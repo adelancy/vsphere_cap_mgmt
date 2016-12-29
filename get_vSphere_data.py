@@ -66,13 +66,22 @@ class VcenterApi(object):
         pass
 
     def build_perf_query(self, vchtime, counterId, instance, resource_entity, interval):
+        """
+
+        :param datetime vchtime:
+        :param Int counterId: Performance counter ID
+        :param instance:
+        :param resource_entity:
+        :param interval:
+        :return:
+        """
         perfManager = self.db_conn.content.perfManager
         metricId = vim.PerformanceManager.MetricId(counterId=counterId, instance=instance)
         startTime = vchtime - timedelta(minutes=(interval + 1))
         endTime = vchtime - timedelta(minutes=1)
-
+        # 20s sampling period to use
         query = vim.PerformanceManager.QuerySpec(intervalId=20, entity=resource_entity,
-                                                 metricId=[metricId],startTime=startTime, endTime=endTime)
+                                                 metricId=[metricId], startTime=startTime, endTime=endTime)
         perf_results = perfManager.QueryPerf(querySpec=[query])
         try:
             assert perf_results not in [None, [], '']
@@ -517,34 +526,37 @@ class VcenterApi(object):
                 }
                 network_devices.append(vnetwork_device)
 
-        #CPU Ready Average
+        # CPU Ready Average
         statCpuReady = self.build_perf_query(vchtime, (self.stat_check('cpu.ready.summation')),
                                         "", vm, interval)
-        print 'statCpuReady is {0}'.format(statCpuReady)
-        cpuReady = (float(sum(statCpuReady[0].value[0].value)) / statInt)
-        output['cpuReady'] = cpuReady
-        #CPU Usage Average % - NOTE: values are type LONG so needs divided by 100 for percentage
+        cpuReady = (float(sum(statCpuReady[0].value[0].value)) / statInt) / 20000
+        output['cpuReady'] = dict()
+        output['cpuReady']['average'] = dict(value=cpuReady * 100, units='percent')
+        output['cpuReady']['max'] = dict(value=(float(100 * max(statCpuReady[0].value[0].value)) / 20000), units='percent')
+
+        # CPU Usage Average % - NOTE: values are type LONG so needs divided by 100 for percentage
         statCpuUsage = self.build_perf_query(vchtime, (self.stat_check('cpu.usage.average')), "", vm, interval)
         cpuUsage = ((float(sum(statCpuUsage[0].value[0].value)) / statInt) / 100)
         output['cpuUsage'] = cpuUsage
-        #Memory Active Average MB
+        # Memory Active Average MB
         statMemoryActive = self.build_perf_query(vchtime, (self.stat_check('mem.active.average')), "", vm, interval)
         memoryActive = (float(sum(statMemoryActive[0].value[0].value) / 1024) / statInt)
-        output['memoryActive']= memoryActive
-        #Memory Shared
+        output['memoryActive'] = memoryActive
+        output['memoryCapacity'] = dict(value=summary.config.memorySizeMB, units='MB')
+        # Memory Shared
         statMemoryShared = self.build_perf_query(vchtime, (self.stat_check('mem.shared.average')), "", vm, interval)
         memoryShared = (float(sum(statMemoryShared[0].value[0].value) / 1024) / statInt)
         output['memoryShared'] = statMemoryShared
-        #Memory Balloon
+        # Memory Balloon
         statMemoryBalloon = self.build_perf_query(vchtime, (self.stat_check('mem.vmmemctl.average')), "", vm, interval)
 
         memoryBalloon = (float(sum(statMemoryBalloon[0].value[0].value) / 1024) / statInt)
         output['memoryBalloon'] = memoryBalloon
-        #Memory Swapped
+        # Memory Swapped
         statMemorySwapped = self.build_perf_query(vchtime, (self.stat_check('mem.swapped.average')), "", vm, interval)
         memorySwapped = (float(sum(statMemorySwapped[0].value[0].value) / 1024) / statInt)
         output['memorySwapped'] = memorySwapped
-        #Datastore Average IO
+        # Datastore Average IO
         statDatastoreIoRead = self.build_perf_query(vchtime, (self.stat_check('datastore.numberReadAveraged.average')),
                                          "*", vm, interval)
         DatastoreIoRead = (float(sum(statDatastoreIoRead[0].value[0].value)) / statInt)
@@ -553,7 +565,7 @@ class VcenterApi(object):
                                           "*", vm, interval)
         DatastoreIoWrite = (float(sum(statDatastoreIoWrite[0].value[0].value)) / statInt)
         output['dataStoreIoWrite'] = DatastoreIoWrite
-        #Datastore Average Latency
+        # Datastore Average Latency
         statDatastoreLatRead = self.build_perf_query(vchtime, (self.stat_check('datastore.totalReadLatency.average')),
                                           "*", vm, interval)
         DatastoreLatRead = (float(sum(statDatastoreLatRead[0].value[0].value)) / statInt)
@@ -561,7 +573,7 @@ class VcenterApi(object):
                                            "*", vm, interval)
         DatastoreLatWrite = (float(sum(statDatastoreLatWrite[0].value[0].value)) / statInt)
 
-        #Network usage (Tx/Rx)
+        # Network usage (Tx/Rx)
         statNetworkTx = self.build_perf_query(vchtime, (self.stat_check('net.transmitted.average')), "", vm, interval)
         networkTx = (float(sum(statNetworkTx[0].value[0].value) * 8 / 1024) / statInt)
         output['networkTx'] = dict(value=networkTx, units='MB')
@@ -569,50 +581,13 @@ class VcenterApi(object):
         networkRx = (float(sum(statNetworkRx[0].value[0].value) * 8 / 1024) / statInt)
         output['networkRx'] = dict(value=networkRx, units='MB')
 
-        print('\nNOTE: Any VM statistics are averages of the last {} minutes\n'.format(statInt / 3))
-        print('Server Name                    :', summary.config.name)
-        print('Description                    :', summary.config.annotation)
-        print('Guest                          :', summary.config.guestFullName)
-        if vm.rootSnapshot:
-            print('Snapshot Status                : Snapshots present')
-        else:
-            print('Snapshot Status                : No Snapshots')
-        print('VM .vmx Path                   :', summary.config.vmPathName)
-        try:
-            print('Virtual Disks                  :', disk_list[0])
-            if len(disk_list) > 1:
-                disk_list.pop(0)
-                for each_disk in disk_list:
-                    print('                                ', each_disk)
-        except IndexError:
-            pass
-        print('Virtual NIC(s)                 :', network_list[0])
-        if len(network_list) > 1:
-            network_list.pop(0)
-            for each_vnic in network_list:
-                print('                                ', each_vnic)
-        print('[VM] Limits                    : CPU: {}, Memory: {}'.format(vmcpulimit, vmmemlimit))
-        print('[VM] Reservations              : CPU: {}, Memory: {}'.format(vmcpures, vmmemres))
-        print('[VM] Number of vCPUs           :', summary.config.numCpu)
-        print('[VM] CPU Ready                 : Average {:.1f} %, Maximum {:.1f} %'.format((cpuReady / 20000 * 100),
-                                                                                           ((float(max(
-                                                                                               statCpuReady[0].value[
-                                                                                                   0].value)) / 20000 * 100))))
-        print('[VM] CPU (%)                   : {:.0f} %'.format(cpuUsage))
-        print('[VM] Memory                    : {} MB ({:.1f} GB)'.format(summary.config.memorySizeMB, (float(summary.config.memorySizeMB) / 1024)))
-        print('[VM] Memory Shared             : {:.0f} %, {:.0f} MB'.format(
-            ((memoryShared / summary.config.memorySizeMB) * 100), memoryShared))
-        print('[VM] Memory Balloon            : {:.0f} %, {:.0f} MB'.format(
-            ((memoryBalloon / summary.config.memorySizeMB) * 100), memoryBalloon))
-        print('[VM] Memory Swapped            : {:.0f} %, {:.0f} MB'.format(
-            ((memorySwapped / summary.config.memorySizeMB) * 100), memorySwapped))
-        print('[VM] Memory Active             : {:.0f} %, {:.0f} MB'.format(
-            ((memoryActive / summary.config.memorySizeMB) * 100), memoryActive))
-        print('[VM] Datastore Average IO      : Read: {:.0f} IOPS, Write: {:.0f} IOPS'.format(DatastoreIoRead,
-                                                                                              DatastoreIoWrite))
-        print('[VM] Datastore Average Latency : Read: {:.0f} ms, Write: {:.0f} ms'.format(DatastoreLatRead,
-                                                                                          DatastoreLatWrite))
-        print('[VM] Overall Network Usage     : Transmitted {:.3f} Mbps, Received {:.3f} Mbps'.format(networkTx, networkRx))
+        output['timeInterval'] = dict(value=statInt/3, units='minutes')
+        output['name'] = summary.config.name
+        output['description'] = summary.config.annotation
+
+        output['guestOS'] = summary.config.guestFullName
+        output['numOfCpus'] = summary.config.numCpu
+        return output
 
 
 def get_epoch_value():
