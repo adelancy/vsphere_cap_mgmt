@@ -51,9 +51,7 @@ class TestVmwareScripts(unittest.TestCase):
 
     def test_get_vm_info(self):
         vms = self.api.get_all_vms()
-        self.api.print_vm_details(vms[0])
-
-
+        self.api.get_vm_details(vms[1])
 
 if __name__ == '__main__':
     unittest.main()

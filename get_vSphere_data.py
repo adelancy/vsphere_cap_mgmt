@@ -449,37 +449,170 @@ class VcenterApi(object):
             (float(summary.runtime.host.summary.quickStats.overallMemoryUsage) / 1024),
             (float(summary.runtime.host.summary.hardware.memorySize) / 1024 / 1024 / 1024)))
 
+    def get_vm_details(self, vm, interval=1, vchtime=None):
+        if vchtime is None:
+            vchtime = self.db_conn.CurrentTime()
+        statInt = interval * 3  # There are 3 20s samples in each minute
+        summary = vm.summary
+        disk_list = []
+        vdisks = []
+        network_list = []
+        network_devices = []
+        output = dict()
 
-def print_vm_info(virtual_machine):
-    """
-    Print information for a particular virtual machine or recurse into a
-    folder with depth protection
-    """
-    summary = virtual_machine.summary
-    print("Name       : ", summary.config.name)
-    print("Template   : ", summary.config.template)
-    print("Path       : ", summary.config.vmPathName)
-    print("Guest      : ", summary.config.guestFullName)
-    print("Instance UUID : ", summary.config.instanceUuid)
-    print("Bios UUID     : ", summary.config.uuid)
-    annotation = summary.config.annotation
-    if annotation:
-        print("Annotation : ", annotation)
-    print("State      : ", summary.runtime.powerState)
-    if summary.guest is not None:
-        ip_address = summary.guest.ipAddress
-        tools_version = summary.guest.toolsStatus
-        if tools_version is not None:
-            print("VMware-tools: ", tools_version)
+        output['guuid'] = vm.config.instanceUuid  # Vcenter globaly unique ID
+
+        # Convert limit and reservation values from -1 to None
+        if vm.resourceConfig.cpuAllocation.limit == -1:
+            vmcpulimit = 'None'
+            output['cpuLimit'] = dict(value=None, units=None)
         else:
-            print("Vmware-tools: None")
-        if ip_address:
-            print("IP         : ", ip_address)
+            vmcpulimit = "{} Mhz".format(vm.resourceConfig.cpuAllocation.limit)
+            output['cpuLimit'] = dict(value=vm.resourceConfig.cpuAllocation.limit, units='MHz')
+        if vm.resourceConfig.memoryAllocation.limit == -1:
+            vmmemlimit = "None"
+            output['memLimit'] = dict(value=None, unit=None)
         else:
-            print("IP         : None")
-    if summary.runtime.question is not None:
-        print("Question  : ", summary.runtime.question.text)
-    print("")
+            vmmemlimit = "{} MB".format(vm.resourceConfig.cpuAllocation.limit)
+            output['memLimit'] = dict(value=vm.resourceConfig.cpuAllocation.memoryAllocation)
+
+        if vm.resourceConfig.cpuAllocation.reservation == 0:
+            vmcpures = "None"
+            output['cpuReservation'] = dict(value=None, units=None)
+        else:
+            vmcpures = "{} Mhz".format(vm.resourceConfig.cpuAllocation.reservation)
+            output['cpuReservation'] = dict(value=vm.resourceConfig.cpuAllocation.reservation, units='MHz')
+        if vm.resourceConfig.memoryAllocation.reservation == 0:
+            vmmemres = "None"
+            output['memReservation'] = dict(value=None, units=None)
+        else:
+            vmmemres = "{} MB".format(vm.resourceConfig.memoryAllocation.reservation)
+            output['memReservation'] = dict(value=vm.resourceConfig.memoryAllocation.reservation, units='MB')
+
+        vm_hardware = vm.config.hardware
+        for each_vm_hardware in vm_hardware.device:
+            if (each_vm_hardware.key >= 2000) and (each_vm_hardware.key < 3000):
+                disk_list.append('{} | {:.1f}GB | Thin: {} | {}'.format(each_vm_hardware.deviceInfo.label,
+                                                             each_vm_hardware.capacityInKB/1024/1024,
+                                                             each_vm_hardware.backing.thinProvisioned,
+                                                             each_vm_hardware.backing.fileName))
+
+                vdisk = {
+                    'label': each_vm_hardware.deviceInfo.label,
+                    'capacity': dict(value=each_vm_hardware.capacityInKB/1024/1024, units='GB'),
+                    'thinProvisioned':each_vm_hardware.backing.thinProvisioned,
+                    'filename': each_vm_hardware.backing.fileName,
+                    'type': 'vDisk'
+                }
+                vdisks.append(vdisk)
+
+            elif (each_vm_hardware.key >= 4000) and (each_vm_hardware.key < 5000):
+                network_list.append('{} | {} | {}'.format(each_vm_hardware.deviceInfo.label,
+                                                             each_vm_hardware.deviceInfo.summary,
+                                                             each_vm_hardware.macAddress))
+                vnetwork_device = {
+                    'label': each_vm_hardware.deviceInfo.label,
+                    'summary': each_vm_hardware.deviceInfo.summary,
+                    'macAddress': each_vm_hardware.macAddress
+                }
+                network_devices.append(vnetwork_device)
+
+        #CPU Ready Average
+        statCpuReady = self.build_perf_query(vchtime, (self.stat_check('cpu.ready.summation')),
+                                        "", vm, interval)
+        print 'statCpuReady is {0}'.format(statCpuReady)
+        cpuReady = (float(sum(statCpuReady[0].value[0].value)) / statInt)
+        output['cpuReady'] = cpuReady
+        #CPU Usage Average % - NOTE: values are type LONG so needs divided by 100 for percentage
+        statCpuUsage = self.build_perf_query(vchtime, (self.stat_check('cpu.usage.average')), "", vm, interval)
+        cpuUsage = ((float(sum(statCpuUsage[0].value[0].value)) / statInt) / 100)
+        output['cpuUsage'] = cpuUsage
+        #Memory Active Average MB
+        statMemoryActive = self.build_perf_query(vchtime, (self.stat_check('mem.active.average')), "", vm, interval)
+        memoryActive = (float(sum(statMemoryActive[0].value[0].value) / 1024) / statInt)
+        output['memoryActive']= memoryActive
+        #Memory Shared
+        statMemoryShared = self.build_perf_query(vchtime, (self.stat_check('mem.shared.average')), "", vm, interval)
+        memoryShared = (float(sum(statMemoryShared[0].value[0].value) / 1024) / statInt)
+        output['memoryShared'] = statMemoryShared
+        #Memory Balloon
+        statMemoryBalloon = self.build_perf_query(vchtime, (self.stat_check('mem.vmmemctl.average')), "", vm, interval)
+
+        memoryBalloon = (float(sum(statMemoryBalloon[0].value[0].value) / 1024) / statInt)
+        output['memoryBalloon'] = memoryBalloon
+        #Memory Swapped
+        statMemorySwapped = self.build_perf_query(vchtime, (self.stat_check('mem.swapped.average')), "", vm, interval)
+        memorySwapped = (float(sum(statMemorySwapped[0].value[0].value) / 1024) / statInt)
+        output['memorySwapped'] = memorySwapped
+        #Datastore Average IO
+        statDatastoreIoRead = self.build_perf_query(vchtime, (self.stat_check('datastore.numberReadAveraged.average')),
+                                         "*", vm, interval)
+        DatastoreIoRead = (float(sum(statDatastoreIoRead[0].value[0].value)) / statInt)
+        output['dataStoreIoRead'] = DatastoreIoRead
+        statDatastoreIoWrite = self.build_perf_query(vchtime, (self.stat_check('datastore.numberWriteAveraged.average')),
+                                          "*", vm, interval)
+        DatastoreIoWrite = (float(sum(statDatastoreIoWrite[0].value[0].value)) / statInt)
+        output['dataStoreIoWrite'] = DatastoreIoWrite
+        #Datastore Average Latency
+        statDatastoreLatRead = self.build_perf_query(vchtime, (self.stat_check('datastore.totalReadLatency.average')),
+                                          "*", vm, interval)
+        DatastoreLatRead = (float(sum(statDatastoreLatRead[0].value[0].value)) / statInt)
+        statDatastoreLatWrite = self.build_perf_query(vchtime, (self.stat_check('datastore.totalWriteLatency.average')),
+                                           "*", vm, interval)
+        DatastoreLatWrite = (float(sum(statDatastoreLatWrite[0].value[0].value)) / statInt)
+
+        #Network usage (Tx/Rx)
+        statNetworkTx = self.build_perf_query(vchtime, (self.stat_check('net.transmitted.average')), "", vm, interval)
+        networkTx = (float(sum(statNetworkTx[0].value[0].value) * 8 / 1024) / statInt)
+        output['networkTx'] = dict(value=networkTx, units='MB')
+        statNetworkRx = self.build_perf_query(vchtime, (self.stat_check('net.received.average')), "", vm, interval)
+        networkRx = (float(sum(statNetworkRx[0].value[0].value) * 8 / 1024) / statInt)
+        output['networkRx'] = dict(value=networkRx, units='MB')
+
+        print('\nNOTE: Any VM statistics are averages of the last {} minutes\n'.format(statInt / 3))
+        print('Server Name                    :', summary.config.name)
+        print('Description                    :', summary.config.annotation)
+        print('Guest                          :', summary.config.guestFullName)
+        if vm.rootSnapshot:
+            print('Snapshot Status                : Snapshots present')
+        else:
+            print('Snapshot Status                : No Snapshots')
+        print('VM .vmx Path                   :', summary.config.vmPathName)
+        try:
+            print('Virtual Disks                  :', disk_list[0])
+            if len(disk_list) > 1:
+                disk_list.pop(0)
+                for each_disk in disk_list:
+                    print('                                ', each_disk)
+        except IndexError:
+            pass
+        print('Virtual NIC(s)                 :', network_list[0])
+        if len(network_list) > 1:
+            network_list.pop(0)
+            for each_vnic in network_list:
+                print('                                ', each_vnic)
+        print('[VM] Limits                    : CPU: {}, Memory: {}'.format(vmcpulimit, vmmemlimit))
+        print('[VM] Reservations              : CPU: {}, Memory: {}'.format(vmcpures, vmmemres))
+        print('[VM] Number of vCPUs           :', summary.config.numCpu)
+        print('[VM] CPU Ready                 : Average {:.1f} %, Maximum {:.1f} %'.format((cpuReady / 20000 * 100),
+                                                                                           ((float(max(
+                                                                                               statCpuReady[0].value[
+                                                                                                   0].value)) / 20000 * 100))))
+        print('[VM] CPU (%)                   : {:.0f} %'.format(cpuUsage))
+        print('[VM] Memory                    : {} MB ({:.1f} GB)'.format(summary.config.memorySizeMB, (float(summary.config.memorySizeMB) / 1024)))
+        print('[VM] Memory Shared             : {:.0f} %, {:.0f} MB'.format(
+            ((memoryShared / summary.config.memorySizeMB) * 100), memoryShared))
+        print('[VM] Memory Balloon            : {:.0f} %, {:.0f} MB'.format(
+            ((memoryBalloon / summary.config.memorySizeMB) * 100), memoryBalloon))
+        print('[VM] Memory Swapped            : {:.0f} %, {:.0f} MB'.format(
+            ((memorySwapped / summary.config.memorySizeMB) * 100), memorySwapped))
+        print('[VM] Memory Active             : {:.0f} %, {:.0f} MB'.format(
+            ((memoryActive / summary.config.memorySizeMB) * 100), memoryActive))
+        print('[VM] Datastore Average IO      : Read: {:.0f} IOPS, Write: {:.0f} IOPS'.format(DatastoreIoRead,
+                                                                                              DatastoreIoWrite))
+        print('[VM] Datastore Average Latency : Read: {:.0f} ms, Write: {:.0f} ms'.format(DatastoreLatRead,
+                                                                                          DatastoreLatWrite))
+        print('[VM] Overall Network Usage     : Transmitted {:.3f} Mbps, Received {:.3f} Mbps'.format(networkTx, networkRx))
 
 
 def get_epoch_value():
