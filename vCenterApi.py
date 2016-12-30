@@ -65,7 +65,7 @@ class VcenterApi(object):
     def get_esxi_host_by_name(self):
         pass
 
-    def build_perf_query(self, vchtime, counterId, instance, resource_entity, interval):
+    def build_perf_query(self, vchtime, counterId, instance='', resource_entity=vim.VirtualMachine, interval=1):
         """
 
         :param datetime vchtime:
@@ -144,26 +144,25 @@ class VcenterApi(object):
         content = self.db_conn.content
         return content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
 
-    def build_esxi_hosts_capacity_info(self):
-        data = self.get_esxi_hosts_info()
+    def get_esxi_hosts_capacity_details(self, esxi_hosts_container):
         out = []
         # Verify hosts properties
-        for host in data.view:
+        for host in esxi_hosts_container:
             info = {
                 'hostname': host.config.network.dnsConfig.hostName,
                 'cluster': host.parent.name,
                 'domain': host.config.network.dnsConfig.searchDomain[0], # can be the .domainName property also if not blank
                 'vendor': host.summary.hardware.vendor,
                 'model': host.summary.hardware.model,
-                'ram': host.summary.hardware.memorySize / (1024/1024/1024),  # GB
+                'ram': host.summary.hardware.memorySize / 1024 / 1024 / 1024,  # GB
                 'cpu-model': host.summary.hardware.numCpuPkgs,
                 'cpu-cores': host.summary.hardware.numCpuCores,
                 'cpu-threads': host.summary.hardware.numNics,
                 'runtime': host.RetrieveHardwareUptime() / (60 * 60 * 24),
                 'id-info': host.summary.hardware.otherIdentifyingInfo,  # List of id tags, can loop thru to identify service tag
                 'status': host.summary.overallStatus,
-                'cpu-ussage-mhz': host.summary.quickstats.overallCpuUsage,
-                'ram-ussage': host.summary.quickstats.overallMemoryUsage / 1024,  # GB
+                'cpu-ussage-mhz': host.summary.quickStats.overallCpuUsage,
+                'ram-ussage': host.summary.quickStats.overallMemoryUsage / 1024,  # GB
                 'cpu-capacity': host.summary.hardware.cpuMhz
             }
             out.append(info)
@@ -210,8 +209,8 @@ class VcenterApi(object):
         content = self.db_conn.content
         return content.viewManager.CreateContainerView(content.rootFolder, [vim.ClusterComputeResource], True)
 
-    def build_cluster_capacity_info(self):
-        clusters = self.get_compute_cluster_view().view
+    def get_cluster_capacity_details(self, clusters):
+        #clusters = self.get_compute_cluster_view().view
         output = []
         for cluster in clusters:
             cluster_usage = cluster.GetResourceUsage()
@@ -323,142 +322,7 @@ class VcenterApi(object):
                                                              type='cluster-datastore-slots')
         return cluster_datastore_slots
 
-    def print_vm_details(self, vm, interval=1, vchtime=None):
-        if vchtime is None:
-            vchtime = self.db_conn.CurrentTime()
-        statInt = interval * 3  # There are 3 20s samples in each minute
-        summary = vm.summary
-        disk_list = []
-        network_list = []
-
-        # Convert limit and reservation values from -1 to None
-        if vm.resourceConfig.cpuAllocation.limit == -1:
-            vmcpulimit = "None"
-        else:
-            vmcpulimit = "{} Mhz".format(vm.resourceConfig.cpuAllocation.limit)
-        if vm.resourceConfig.memoryAllocation.limit == -1:
-            vmmemlimit = "None"
-        else:
-            vmmemlimit = "{} MB".format(vm.resourceConfig.cpuAllocation.limit)
-
-        if vm.resourceConfig.cpuAllocation.reservation == 0:
-            vmcpures = "None"
-        else:
-            vmcpures = "{} Mhz".format(vm.resourceConfig.cpuAllocation.reservation)
-        if vm.resourceConfig.memoryAllocation.reservation == 0:
-            vmmemres = "None"
-        else:
-            vmmemres = "{} MB".format(vm.resourceConfig.memoryAllocation.reservation)
-
-        vm_hardware = vm.config.hardware
-        for each_vm_hardware in vm_hardware.device:
-            if (each_vm_hardware.key >= 2000) and (each_vm_hardware.key < 3000):
-                disk_list.append('{} | {:.1f}GB | Thin: {} | {}'.format(each_vm_hardware.deviceInfo.label,
-                                                             each_vm_hardware.capacityInKB/1024/1024,
-                                                             each_vm_hardware.backing.thinProvisioned,
-                                                             each_vm_hardware.backing.fileName))
-            elif (each_vm_hardware.key >= 4000) and (each_vm_hardware.key < 5000):
-                network_list.append('{} | {} | {}'.format(each_vm_hardware.deviceInfo.label,
-                                                             each_vm_hardware.deviceInfo.summary,
-                                                             each_vm_hardware.macAddress))
-
-        #CPU Ready Average
-        statCpuReady = self.build_perf_query(vchtime, (self.stat_check('cpu.ready.summation')),
-                                        "", vm, interval)
-        cpuReady = (float(sum(statCpuReady[0].value[0].value)) / statInt)
-        #CPU Usage Average % - NOTE: values are type LONG so needs divided by 100 for percentage
-        statCpuUsage = self.build_perf_query(vchtime, (self.stat_check('cpu.usage.average')), "", vm, interval)
-        cpuUsage = ((float(sum(statCpuUsage[0].value[0].value)) / statInt) / 100)
-        #Memory Active Average MB
-        statMemoryActive = self.build_perf_query(vchtime, (self.stat_check('mem.active.average')), "", vm, interval)
-        memoryActive = (float(sum(statMemoryActive[0].value[0].value) / 1024) / statInt)
-        #Memory Shared
-        statMemoryShared = self.build_perf_query(vchtime, (self.stat_check('mem.shared.average')), "", vm, interval)
-        memoryShared = (float(sum(statMemoryShared[0].value[0].value) / 1024) / statInt)
-        #Memory Balloon
-        statMemoryBalloon = self.build_perf_query(vchtime, (self.stat_check('mem.vmmemctl.average')), "", vm, interval)
-        memoryBalloon = (float(sum(statMemoryBalloon[0].value[0].value) / 1024) / statInt)
-        #Memory Swapped
-        statMemorySwapped = self.build_perf_query(vchtime, (self.stat_check('mem.swapped.average')), "", vm, interval)
-        memorySwapped = (float(sum(statMemorySwapped[0].value[0].value) / 1024) / statInt)
-        #Datastore Average IO
-        statDatastoreIoRead = self.build_perf_query(vchtime, (self.stat_check('datastore.numberReadAveraged.average')),
-                                         "*", vm, interval)
-        DatastoreIoRead = (float(sum(statDatastoreIoRead[0].value[0].value)) / statInt)
-        statDatastoreIoWrite = self.build_perf_query(vchtime, (self.stat_check('datastore.numberWriteAveraged.average')),
-                                          "*", vm, interval)
-        DatastoreIoWrite = (float(sum(statDatastoreIoWrite[0].value[0].value)) / statInt)
-        #Datastore Average Latency
-        statDatastoreLatRead = self.build_perf_query(vchtime, (self.stat_check('datastore.totalReadLatency.average')),
-                                          "*", vm, interval)
-        DatastoreLatRead = (float(sum(statDatastoreLatRead[0].value[0].value)) / statInt)
-        statDatastoreLatWrite = self.build_perf_query(vchtime, (self.stat_check('datastore.totalWriteLatency.average')),
-                                           "*", vm, interval)
-        DatastoreLatWrite = (float(sum(statDatastoreLatWrite[0].value[0].value)) / statInt)
-
-        #Network usage (Tx/Rx)
-        statNetworkTx = self.build_perf_query(vchtime, (self.stat_check('net.transmitted.average')), "", vm, interval)
-        networkTx = (float(sum(statNetworkTx[0].value[0].value) * 8 / 1024) / statInt)
-        statNetworkRx = self.build_perf_query(vchtime, (self.stat_check('net.received.average')), "", vm, interval)
-        networkRx = (float(sum(statNetworkRx[0].value[0].value) * 8 / 1024) / statInt)
-
-        print('\nNOTE: Any VM statistics are averages of the last {} minutes\n'.format(statInt / 3))
-        print('Server Name                    :', summary.config.name)
-        print('Description                    :', summary.config.annotation)
-        print('Guest                          :', summary.config.guestFullName)
-        if vm.rootSnapshot:
-            print('Snapshot Status                : Snapshots present')
-        else:
-            print('Snapshot Status                : No Snapshots')
-        print('VM .vmx Path                   :', summary.config.vmPathName)
-        try:
-            print('Virtual Disks                  :', disk_list[0])
-            if len(disk_list) > 1:
-                disk_list.pop(0)
-                for each_disk in disk_list:
-                    print('                                ', each_disk)
-        except IndexError:
-            pass
-        print('Virtual NIC(s)                 :', network_list[0])
-        if len(network_list) > 1:
-            network_list.pop(0)
-            for each_vnic in network_list:
-                print('                                ', each_vnic)
-        print('[VM] Limits                    : CPU: {}, Memory: {}'.format(vmcpulimit, vmmemlimit))
-        print('[VM] Reservations              : CPU: {}, Memory: {}'.format(vmcpures, vmmemres))
-        print('[VM] Number of vCPUs           :', summary.config.numCpu)
-        print('[VM] CPU Ready                 : Average {:.1f} %, Maximum {:.1f} %'.format((cpuReady / 20000 * 100),
-                                                                                           ((float(max(
-                                                                                               statCpuReady[0].value[
-                                                                                                   0].value)) / 20000 * 100))))
-        print('[VM] CPU (%)                   : {:.0f} %'.format(cpuUsage))
-        print('[VM] Memory                    : {} MB ({:.1f} GB)'.format(summary.config.memorySizeMB, (float(summary.config.memorySizeMB) / 1024)))
-        print('[VM] Memory Shared             : {:.0f} %, {:.0f} MB'.format(
-            ((memoryShared / summary.config.memorySizeMB) * 100), memoryShared))
-        print('[VM] Memory Balloon            : {:.0f} %, {:.0f} MB'.format(
-            ((memoryBalloon / summary.config.memorySizeMB) * 100), memoryBalloon))
-        print('[VM] Memory Swapped            : {:.0f} %, {:.0f} MB'.format(
-            ((memorySwapped / summary.config.memorySizeMB) * 100), memorySwapped))
-        print('[VM] Memory Active             : {:.0f} %, {:.0f} MB'.format(
-            ((memoryActive / summary.config.memorySizeMB) * 100), memoryActive))
-        print('[VM] Datastore Average IO      : Read: {:.0f} IOPS, Write: {:.0f} IOPS'.format(DatastoreIoRead,
-                                                                                              DatastoreIoWrite))
-        print('[VM] Datastore Average Latency : Read: {:.0f} ms, Write: {:.0f} ms'.format(DatastoreLatRead,
-                                                                                          DatastoreLatWrite))
-        print('[VM] Overall Network Usage     : Transmitted {:.3f} Mbps, Received {:.3f} Mbps'.format(networkTx, networkRx))
-        print('[Host] Name                    : {}'.format(summary.runtime.host.name))
-        print('[Host] CPU Detail              : Processor Sockets: {}, Cores per Socket {}'.format(
-            summary.runtime.host.summary.hardware.numCpuPkgs,
-            (summary.runtime.host.summary.hardware.numCpuCores / summary.runtime.host.summary.hardware.numCpuPkgs)))
-        print('[Host] CPU Type                : {}'.format(summary.runtime.host.summary.hardware.cpuModel))
-        print('[Host] CPU Usage               : Used: {} Mhz, Total: {} Mhz'.format(
-            summary.runtime.host.summary.quickStats.overallCpuUsage,
-            (summary.runtime.host.summary.hardware.cpuMhz * summary.runtime.host.summary.hardware.numCpuCores)))
-        print('[Host] Memory Usage            : Used: {:.0f} GB, Total: {:.0f} GB\n'.format(
-            (float(summary.runtime.host.summary.quickStats.overallMemoryUsage) / 1024),
-            (float(summary.runtime.host.summary.hardware.memorySize) / 1024 / 1024 / 1024)))
-
-    def get_vm_details(self, vm, interval=1, vchtime=None):
+    def get_vm_capacity_details(self, vm, interval=1, vchtime=None):
         if vchtime is None:
             vchtime = self.db_conn.CurrentTime()
         statInt = interval * 3  # There are 3 20s samples in each minute
