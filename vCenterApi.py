@@ -214,24 +214,13 @@ class VcenterApi(object):
         :param kwargs:
         :return:
         """
-        out = dict()
         keymap = dict(
             cpuUsageAvg=dict(counter='cpu.usage.average', units='percentage'),
             cpuUsageMax=dict(counter='cpu.usage.maximum', units='percentage'),
             memUsageAvg=dict(counter='mem.usage.average', units='percentage'),
             memUsageMax=dict(counter='mem.usage.maximum', units='percentage')
         )
-
-        for k, v in keymap.items():
-            val = self.get_averaged_performance_stat(esxi_host, counter_name=v['counter'], instance="")
-            if v['units'] == 'percentage':
-                val /= 100  # Because % values stored as Longs, need to divide by 100
-
-            out[k] = dict(
-                value=val,
-                units=v['units']
-            )
-        return out
+        return self.get_resource_performance_stats(esxi_host, keymap)
 
     def get_host_by_dns(self, dns_name=None, ip_address=None):
         try:
@@ -246,7 +235,6 @@ class VcenterApi(object):
 
     def get_datastore_capacity_info(self, datastore_view):
         output = []
-        # epoch = get_epoch_value()
         for datastore in datastore_view:
             info = {
                 'name': datastore.summary.name,
@@ -255,10 +243,18 @@ class VcenterApi(object):
                 'uncommitted ': convert_byte_units(datastore.summary.uncommitted, unit='giga'),
                 'vmCount': len(datastore.vm),
                 'accessible ': datastore.summary.accessible,
-                'type': datastore.summary.type
+                'type': datastore.summary.type,
+                'timestamp': self.db_conn.CurrentTime()
             }
             output.append(info)
         return output
+
+    def get_datastore_performance_stats(self, datastore):
+        keymap = dict(
+            usageAvg=dict(counter='datastore.write.average', units='kBps'),
+            UsageMax=dict(counter='datastore.read.average', units='kBps'),
+        )
+        return self.get_resource_performance_stats(datastore, keymap)
 
     def get_compute_cluster_view(self):
         content = self.db_conn.content
@@ -379,13 +375,10 @@ class VcenterApi(object):
         return cluster_datastore_slots
 
     def get_vm_capacity_details(self, resource_entity):
-
-        summary = resource_entity.summary
-        disk_list = []
-        vdisks = []
-        network_list = []
-        network_devices = []
         output = dict()
+        summary = resource_entity.summary
+        output['vDisks'] = []
+        output['vNICs'] = []
 
         output['uuid'] = resource_entity.config.instanceUuid  # vCenter globally unique ID
         output['powerState'] = resource_entity.runtime.powerState
@@ -417,37 +410,55 @@ class VcenterApi(object):
         vm_hardware = resource_entity.config.hardware
         for each_vm_hardware in vm_hardware.device:
             if (each_vm_hardware.key >= 2000) and (each_vm_hardware.key < 3000):
-                # Todo: Use dictionary instead of concatenating values as a string
-                disk_list.append('{} | {:.1f}GB | Thin: {} | {}'.format(each_vm_hardware.deviceInfo.label,
-                                                                        each_vm_hardware.capacityInKB / 1024 / 1024,
-                                                                        each_vm_hardware.backing.thinProvisioned,
-                                                                        each_vm_hardware.backing.fileName))
-
                 vdisk = {
                     'label': each_vm_hardware.deviceInfo.label,
                     'capacity': dict(value=each_vm_hardware.capacityInKB / 1024 / 1024, units='GB'),
                     'thinProvisioned': each_vm_hardware.backing.thinProvisioned,
-                    'filename': each_vm_hardware.backing.fileName,
+                    'fileName': each_vm_hardware.backing.fileName,
                     'type': 'vDisk'
                 }
-                vdisks.append(vdisk)
+                output['vDisks'].append(vdisk)
 
             elif (each_vm_hardware.key >= 4000) and (each_vm_hardware.key < 5000):
-                network_list.append('{} | {} | {}'.format(each_vm_hardware.deviceInfo.label,
-                                                          each_vm_hardware.deviceInfo.summary,
-                                                          each_vm_hardware.macAddress))
                 vnetwork_device = {
                     'label': each_vm_hardware.deviceInfo.label,
                     'summary': each_vm_hardware.deviceInfo.summary,
-                    'macAddress': each_vm_hardware.macAddress
+                    'macAddress': each_vm_hardware.macAddress,
+                    'type': 'vNIC'
                 }
-                network_devices.append(vnetwork_device)
+                output['vNICs'].append(vnetwork_device)
         output['timestamp'] = self.db_conn.CurrentTime()
         output['performanceStats'] = self.get_vm_performance_stats(resource_entity)
         return output
 
+    def get_resource_performance_stats(self, resource_entity, keymap):
+        out = dict()
+        for k, v in keymap.items():
+            try:
+                val = self.get_averaged_performance_stat(resource_entity, counter_name=v['counter'],
+                                                         instance=v.get('instance', ""))
+                if v['units'] == 'percentage':
+                    try:
+                        val /= 100  # Because % values stored as Longs, need to divide by 100
+                    except TypeError as err:
+                        pass
+                        # print k, v
+                        # print resource_entity.runtime.powerState
+                        # print resource_entity.name
+                        # raise err
+
+                out[k] = dict(
+                    value=val,
+                    units=v['units']
+                )
+            except QueryIsEmptyError:
+                pass
+        return out
+
     def get_vm_performance_stats(self, resource_entity):
         """
+        See https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/datastore_counters.html
+        for more information
         :param resource_entity:
         :param interval: Time interval to query against in minutes
         :param vchtime:
@@ -455,43 +466,35 @@ class VcenterApi(object):
         """
 
         keymap = dict(
-            cpuReady=dict(counter='cpu.ready.summation', units='ms'),
-            cpuWait=dict(counter='cpu.wait.summation', units='ms'),
-            cpuIdle=dict(counter='cpu.idle.summation', units='ms'),
             cpuUsageAvg=dict(counter='cpu.usage.average', units='percentage'),
-            cpuUsageMax=dict(counter='cpu.usage.maximum', units='percentage'),
-            cpuCoStop=dict(counter='cpu.costop.summation', units='ms'),
+            cpuUsageMax=dict(counter='cpu.usage.maximum', units='percentage', instance='*'),
             memUsageAvg=dict(counter='mem.usage.average', units='percentage'),
             memUsageMax=dict(counter='mem.usage.maximum', units='percentage'),
             memoryActive=dict(counter='mem.active.average', units='kB'),
-            memoryShared=dict(counter='mem.usage.maximum', units='percentage'),
-            memorySwapped=dict(counter='mem.usage.maximum', units='percentage'),
-            dataStoreIoWrites=dict(counter='datastore.numberWriteAveraged.average', units=None, instance='*'),
-            dataStoreLatWrite=dict(counter='datastore.totalWriteLatency.average', units='ms', instance='*'),
-            dataStoreLatRead=dict(counter='datastore.totalReadLatency.average', units='ms', instance='*'),
+            memoryShared=dict(counter='mem.shared.average', units='kB'),
+            memorySwapped=dict(counter='mem.swapused.average', units='kB'),
+            datastoreIoWrites=dict(counter='datastore.numberWriteAveraged.average', units=None, instance='*'),
+            datastoreLatWrite=dict(counter='datastore.totalWriteLatency.average', units='ms', instance='*'),
+            datastoreLatRead=dict(counter='datastore.totalReadLatency.average', units='ms', instance='*'),
             networkTx=dict(counter='net.transmitted.average', units='MB', instance='*'),
             networkTRx=dict(counter='net.received.average', units='MB', instance='*'),
         )
-        output = dict()
 
-        for k, v in keymap.items():
+        queue_stats = dict(
+            cpuReady=dict(counter='cpu.ready.summation', units='ms'),
+            cpuWait=dict(counter='cpu.wait.summation', units='ms'),
+            cpuIdle=dict(counter='cpu.idle.summation', units='ms'),
+            cpuCoStop=dict(counter='cpu.costop.summation', units='ms'),
+        )
+
+        output = self.get_resource_performance_stats(resource_entity, keymap)
+
+        for k, v in queue_stats.items():
             try:
-                if k in ['cpuReady', 'cpuIdle', 'cpuWait']:
-                    output[k] = self.get_cpu_queue_stats(resource_entity, counter_name=v.get('counter'))
-                else:
-                    val = self.get_averaged_performance_stat(resource_entity, v.get('counter'),
-                                                             instance=v.get('instance', ""))
-                    if v.get('units') == 'percentage':
-                        try:
-                            val /= 100  # query results stored as longs, need to div by 100
-                        except TypeError:
-                            pass
-                    output[k] = dict(
-                        value=val,
-                        units=v.get('units')
-                    )
+                output[k] = self.get_cpu_queue_stats(resource_entity, counter_name=v.get('counter'))
             except QueryIsEmptyError:
                 pass
+
         return output
 
     def get_averaged_performance_stat(self, resource_entity, counter_name, instance=""):
