@@ -238,6 +238,7 @@ class VcenterApi(object):
         for datastore in datastore_view:
             info = {
                 'name': datastore.summary.name,
+                'url': datastore.info.url,
                 'capacity': dict(value=convert_byte_units(datastore.summary.capacity, unit='giga'), units='GB'),
                 'freeSpace': dict(value=convert_byte_units(datastore.summary.freeSpace, unit='giga'), units='GB'),
                 'uncommitted ': dict(value=convert_byte_units(datastore.summary.uncommitted, unit='giga'), units='GB'),
@@ -384,29 +385,39 @@ class VcenterApi(object):
         output['powerState'] = resource_entity.runtime.powerState
         # Convert limit and reservation values from -1 to None
         if resource_entity.resourceConfig.cpuAllocation.limit == -1:
-            output['cpuLimit'] = dict(value=None, units=None)
+            output['cpuLimit'] = dict(value=None, units='MHz')
         else:
             output['cpuLimit'] = dict(value=resource_entity.resourceConfig.cpuAllocation.limit, units='MHz')
         if resource_entity.resourceConfig.memoryAllocation.limit == -1:
-            output['memLimit'] = dict(value=None, unit=None)
+            output['memLimit'] = dict(value=None, units='MB')
         else:
             output['memLimit'] = dict(value=resource_entity.resourceConfig.cpuAllocation.memoryAllocation, units='MB')
         if resource_entity.resourceConfig.cpuAllocation.reservation == 0:
-            output['cpuReservation'] = dict(value=None, units=None)
+            output['cpuReservation'] = dict(value=None, units='MHz')
         else:
             output['cpuReservation'] = dict(value=resource_entity.resourceConfig.cpuAllocation.reservation, units='MHz')
         if resource_entity.resourceConfig.memoryAllocation.reservation == 0:
-            output['memReservation'] = dict(value=None, units=None)
+            output['memReservation'] = dict(value=None, units='MB')
         else:
             output['memReservation'] = dict(value=resource_entity.resourceConfig.memoryAllocation.reservation,
                                             units='MB')
 
-        output['memoryCapacity'] = dict(val=summary.config.memorySizeMB, units='MB')
+        output['memoryCapacity'] = dict(value=summary.config.memorySizeMB, units='MB')
         output['name'] = summary.config.name
         output['description'] = summary.config.annotation
         output['guestOS'] = summary.config.guestFullName
         output['numOfCpus'] = summary.config.numCpu
-
+        output['datstoreUsage'] = []
+        for datastoreInfo in resource_entity.storage.perDatastoreUsage:
+            output['datstoreUsage'].append(
+                dict(
+                    name=datastoreInfo.datastore.info.name,
+                    url=datastoreInfo.datastore.info.url,
+                    committed=dict(value=float(datastoreInfo.committed / pow(1024, 3)), units='GB'),
+                    uncommitted=dict(value=float(datastoreInfo.uncommitted / pow(1024, 3)), units='GB'),
+                    unshared=dict(value=float(datastoreInfo.unshared / pow(1024, 3)), units='GB')
+                )
+            )
         vm_hardware = resource_entity.config.hardware
         for each_vm_hardware in vm_hardware.device:
             if (each_vm_hardware.key >= 2000) and (each_vm_hardware.key < 3000):
@@ -442,10 +453,6 @@ class VcenterApi(object):
                         val /= 100  # Because % values stored as Longs, need to divide by 100
                     except TypeError as err:
                         pass
-                        # print k, v
-                        # print resource_entity.runtime.powerState
-                        # print resource_entity.name
-                        # raise err
 
                 out[k] = dict(
                     value=val,
@@ -477,7 +484,7 @@ class VcenterApi(object):
             datastoreLatWrite=dict(counter='datastore.totalWriteLatency.average', units='ms', instance='*'),
             datastoreLatRead=dict(counter='datastore.totalReadLatency.average', units='ms', instance='*'),
             networkTx=dict(counter='net.transmitted.average', units='MB', instance='*'),
-            networkTRx=dict(counter='net.received.average', units='MB', instance='*'),
+            networkRx=dict(counter='net.received.average', units='MB', instance='*'),
         )
 
         queue_stats = dict(
