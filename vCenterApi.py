@@ -238,9 +238,9 @@ class VcenterApi(object):
         for datastore in datastore_view:
             info = {
                 'name': datastore.summary.name,
-                'capacityInGb': convert_byte_units(datastore.summary.capacity, unit='giga'),
-                'freeSpaceInGb': convert_byte_units(datastore.summary.freeSpace, unit='giga'),
-                'uncommitted ': convert_byte_units(datastore.summary.uncommitted, unit='giga'),
+                'capacity': dict(value=convert_byte_units(datastore.summary.capacity, unit='giga'), units='GB'),
+                'freeSpace': dict(value=convert_byte_units(datastore.summary.freeSpace, unit='giga'), units='GB'),
+                'uncommitted ': dict(value=convert_byte_units(datastore.summary.uncommitted, unit='giga'), units='GB'),
                 'vmCount': len(datastore.vm),
                 'accessible ': datastore.summary.accessible,
                 'type': datastore.summary.type,
@@ -401,7 +401,7 @@ class VcenterApi(object):
             output['memReservation'] = dict(value=resource_entity.resourceConfig.memoryAllocation.reservation,
                                             units='MB')
 
-        output['memoryCapacityInMb'] = summary.config.memorySizeMB
+        output['memoryCapacity'] = dict(val=summary.config.memorySizeMB, units='MB')
         output['name'] = summary.config.name
         output['description'] = summary.config.annotation
         output['guestOS'] = summary.config.guestFullName

@@ -58,7 +58,7 @@ class TestVmwareScripts(unittest.TestCase):
     def test_get_vm_info(self):
         vms = self.api.get_all_vms()
         data = self.api.get_vm_capacity_details(vms[1])
-        #print data['performanceStats']['dataStoreLatRead']
+        print data['performanceStats']['datastoreLatRead']
         self.assertTrue(data['performanceStats'])
 
     def test_get_datastore_capacity(self):
