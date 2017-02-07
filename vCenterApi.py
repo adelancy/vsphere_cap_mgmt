@@ -201,6 +201,7 @@ class VcenterApi(object):
                 'uptime': host.summary.quickStats.uptime,
                 'powerState': host.summary.runtime.powerState,
                 'connectionState': host.summary.runtime.connectionState,
+                'vDiskMaxCapacity': host.summary.runtime.hostMaxVirtualDiskCapacity,
                 'performanceStats': self.get_esxi_host_performance_stats(host)
             }
             out.append(info)
@@ -383,6 +384,7 @@ class VcenterApi(object):
 
         output['uuid'] = resource_entity.config.instanceUuid  # vCenter globally unique ID
         output['powerState'] = resource_entity.runtime.powerState
+        output['host'] = resource_entity.summary.runtime.host.summary.config.name
         output['cpuUsage'] = dict(value=resource_entity.summary.quickStats.overallCpuUsage, units='MHz')
         output['memoryUsage'] = dict(value=resource_entity.summary.quickStats.guestMemoryUsage, units='MB')
         output['status'] = resource_entity.summary.overallStatus
