@@ -12,7 +12,7 @@ from errors import QueryIsEmptyError
 
 class VcenterApi(object):
     def __init__(self, vCenter_host, user, password, port=443, sample_period=20,
-                 start=datetime.utcnow(), time_interval=60):
+                 start=None, time_interval=24*60):
         """
         :param vCenter_host:
         :param user:
@@ -383,6 +383,9 @@ class VcenterApi(object):
 
         output['uuid'] = resource_entity.config.instanceUuid  # vCenter globally unique ID
         output['powerState'] = resource_entity.runtime.powerState
+        output['cpuUsage'] = dict(value=resource_entity.summary.quickStats.overallCpuUsage, units='MHz')
+        output['memoryUsage'] = dict(value=resource_entity.summary.quickStats.guestMemoryUsage, units='MB')
+        output['status'] = resource_entity.summary.overallStatus
         # Convert limit and reservation values from -1 to None
         if resource_entity.resourceConfig.cpuAllocation.limit == -1:
             output['cpuLimit'] = dict(value=None, units='MHz')
@@ -402,7 +405,7 @@ class VcenterApi(object):
             output['memReservation'] = dict(value=resource_entity.resourceConfig.memoryAllocation.reservation,
                                             units='MB')
 
-        output['memoryCapacity'] = dict(value=summary.config.memorySizeMB, units='MB')
+        output['memCapacity'] = dict(value=summary.config.memorySizeMB, units='MB')
         output['name'] = summary.config.name
         output['description'] = summary.config.annotation
         output['guestOS'] = summary.config.guestFullName
@@ -442,26 +445,6 @@ class VcenterApi(object):
         output['performanceStats'] = self.get_vm_performance_stats(resource_entity)
         return output
 
-    def get_resource_performance_stats(self, resource_entity, keymap):
-        out = dict()
-        for k, v in keymap.items():
-            try:
-                val = self.get_averaged_performance_stat(resource_entity, counter_name=v['counter'],
-                                                         instance=v.get('instance', ""))
-                if v['units'] == 'percentage':
-                    try:
-                        val /= 100  # Because % values stored as Longs, need to divide by 100
-                    except TypeError as err:
-                        pass
-
-                out[k] = dict(
-                    value=val,
-                    units=v['units']
-                )
-            except QueryIsEmptyError:
-                pass
-        return out
-
     def get_vm_performance_stats(self, resource_entity):
         """
         See https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/datastore_counters.html
@@ -477,10 +460,11 @@ class VcenterApi(object):
             cpuUsageMax=dict(counter='cpu.usage.maximum', units='percentage', instance='*'),
             memUsageAvg=dict(counter='mem.usage.average', units='percentage'),
             memUsageMax=dict(counter='mem.usage.maximum', units='percentage'),
-            memoryActive=dict(counter='mem.active.average', units='kB'),
-            memoryShared=dict(counter='mem.shared.average', units='kB'),
-            memorySwapped=dict(counter='mem.swapused.average', units='kB'),
+            memActive=dict(counter='mem.active.average', units='kB'),
+            memShared=dict(counter='mem.shared.average', units='kB'),
+            memSwapped=dict(counter='mem.swapused.average', units='kB'),
             datastoreIoWrites=dict(counter='datastore.numberWriteAveraged.average', units=None, instance='*'),
+            datastoreIoReads=dict(counter='datastore.numberReadAveraged.average', units=None, instance='*'),
             datastoreLatWrite=dict(counter='datastore.totalWriteLatency.average', units='ms', instance='*'),
             datastoreLatRead=dict(counter='datastore.totalReadLatency.average', units='ms', instance='*'),
             networkTx=dict(counter='net.transmitted.average', units='MB', instance='*'),
@@ -503,6 +487,29 @@ class VcenterApi(object):
                 pass
 
         return output
+
+    def get_resource_performance_stats(self, resource_entity, keymap):
+        out = dict()
+        out['start'] = self._start
+        out['end'] = self._end
+
+        for k, v in keymap.items():
+            try:
+                val = self.get_averaged_performance_stat(resource_entity, counter_name=v['counter'],
+                                                         instance=v.get('instance', ""))
+                if v['units'] == 'percentage':
+                    try:
+                        val /= 100  # Because % values stored as Longs, need to divide by 100
+                    except TypeError as err:
+                        pass
+
+                out[k] = dict(
+                    value=val,
+                    units=v['units']
+                )
+            except QueryIsEmptyError:
+                pass
+        return out
 
     def get_averaged_performance_stat(self, resource_entity, counter_name, instance=""):
         try:
