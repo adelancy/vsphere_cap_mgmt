@@ -281,7 +281,7 @@ class VcenterApi(object):
                 'numHosts': cluster.summary.numHosts,
                 'numEffectiveHosts': cluster.summary.numEffectiveHosts,
                 'overallStatus': cluster.summary.overallStatus,
-                'timestamp': self.db_conn.CurrentTime()
+                'serverTimestamp': self.db_conn.CurrentTime()
             }
             output.append(cluster_info)
         return output
