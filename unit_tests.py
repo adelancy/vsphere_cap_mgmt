@@ -28,10 +28,10 @@ class TestVmwareScripts(unittest.TestCase):
         data = self.api.get_esxi_hosts_capacity_details(data.view)
         self.assertEqual(len(data), 3)
         for k, v in data[0]['performanceStats'].items():
-            #print data[0]['hostname']
-            #print k, v
-            self.assertTrue(v['value'])
-            # self.assertLessEqual(v['value'], 100.0)
+            try:
+                self.assertTrue(v['value'])
+            except TypeError:
+                self.assertTrue(v)
 
     def test_get_cluster_info(self):
         info = self.api.get_cluster_capacity_details(self.api.get_compute_cluster_view())

@@ -191,8 +191,7 @@ class VcenterApi(object):
                 'cpuCores': host.summary.hardware.numCpuCores,
                 'cpuThreads': host.summary.hardware.numNics,
                 'runtime': host.RetrieveHardwareUptime() / (60 * 60 * 24),
-                'idInfo': None,  # host.summary.hardware.otherIdentifyingInfo,  # Todo: Parse better
-                # List of id tags, can loop thru to identify service tag
+                'idInfo': self.parse_host_idinfo(host.summary.hardware.otherIdentifyingInfo),
                 'status': host.summary.overallStatus,
                 'cpuUsageInMhz': host.summary.quickStats.overallCpuUsage,
                 'ramUsageInMb': host.summary.quickStats.overallMemoryUsage,  # MB
@@ -207,6 +206,15 @@ class VcenterApi(object):
             }
             out.append(info)
         return out
+
+    def parse_host_idinfo(self, id_info):
+        output = dict()
+        for info in id_info:
+            if info.identifierType.key == 'AssetTag':
+                output['assetTag'] = info.identifierValue
+            if info.identifierType.key == 'ServiceTag':
+                output['serviceTag'] = info.identifierValue
+        return output
 
     def get_esxi_host_performance_stats(self, esxi_host):
         """
