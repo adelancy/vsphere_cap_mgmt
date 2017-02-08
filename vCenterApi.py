@@ -202,6 +202,7 @@ class VcenterApi(object):
                 'powerState': host.summary.runtime.powerState,
                 'connectionState': host.summary.runtime.connectionState,
                 'vDiskMaxCapacity': host.summary.runtime.hostMaxVirtualDiskCapacity,
+                'serverTimestamp': self.db_conn.CurrentTime(),
                 'performanceStats': self.get_esxi_host_performance_stats(host)
             }
             out.append(info)
