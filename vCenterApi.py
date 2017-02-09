@@ -187,20 +187,20 @@ class VcenterApi(object):
                 # can be the .domainName property also if not blank
                 'vendor': host.summary.hardware.vendor,
                 'model': host.summary.hardware.model,
-                'cpuModel': host.summary.hardware.numCpuPkgs,
-                'cpuCores': host.summary.hardware.numCpuCores,
-                'cpuThreads': host.summary.hardware.numNics,
-                'runtime': host.RetrieveHardwareUptime() / (60 * 60 * 24),
+                'cpuModel': host.summary.hardware.cpuModel,
+                'cpuCores': dict(value=host.summary.hardware.numCpuCores, units=None),
+                'cpuThreads': dict(value=host.summary.hardware.numNics, units=None),
+                'runtime': dict(value=host.RetrieveHardwareUptime() / (60 * 60 * 24), units='days'),
                 'idInfo': self.parse_host_idinfo(host.summary.hardware.otherIdentifyingInfo),
                 'status': host.summary.overallStatus,
-                'cpuUsageInMhz': host.summary.quickStats.overallCpuUsage,
-                'ramUsageInMb': host.summary.quickStats.overallMemoryUsage,  # MB
-                'cpuCapacityInMhz': host.summary.hardware.cpuMhz,
-                'ramCapacityInMb': host.summary.hardware.memorySize / 1024 / 1024 / 1024,  # GB
-                'uptime': host.summary.quickStats.uptime,
+                'cpuUsage': dict(value=host.summary.quickStats.overallCpuUsage, units='MHz'),
+                'ramUsage': dict(value=host.summary.quickStats.overallMemoryUsage, units='MB'),  # MB
+                'cpuCapacity': dict(value=host.summary.hardware.cpuMhz, units='MHz'),
+                'ramCapacity': dict(value=host.summary.hardware.memorySize / pow(1024, 3), units='GB'),
+                'uptime': dict(value=host.summary.quickStats.uptime, units='seconds'),
                 'powerState': host.summary.runtime.powerState,
                 'connectionState': host.summary.runtime.connectionState,
-                'vDiskMaxCapacity': host.summary.runtime.hostMaxVirtualDiskCapacity,
+                'vDiskMaxCapacity': dict(value=host.summary.runtime.hostMaxVirtualDiskCapacity, units=None),
                 'serverTimestamp': self.db_conn.CurrentTime(),
                 'performanceStats': self.get_esxi_host_performance_stats(host)
             }
@@ -277,18 +277,18 @@ class VcenterApi(object):
             cluster_usage = cluster.GetResourceUsage()
             cluster_info = {
                 'name': cluster.name,
-                'cpuCapacityMHz': cluster.summary.totalCpu,
-                'effectiveCpuMHz': cluster.summary.effectiveCpu,
-                'cpuUsedMHz': cluster_usage.cpuUsedMHz,
-                'memCapacityMB': cluster_usage.memCapacityMB,
-                'memUsedMB': cluster_usage.memUsedMB,
-                'numCpuCores': cluster.summary.numCpuCores,
-                'numCpuThreads': cluster.summary.numCpuThreads,
-                'storageUsedMB': cluster_usage.storageUsedMB,
-                'storageCapacityMB': cluster_usage.storageCapacityMB,
-                'effectiveMemoryMB': cluster.summary.effectiveMemory,  # MB
-                'numHosts': cluster.summary.numHosts,
-                'numEffectiveHosts': cluster.summary.numEffectiveHosts,
+                'cpuCapacity': dict(value=cluster.summary.totalCpu, units='MHz'),
+                'effectiveCpu': dict(value=cluster.summary.effectiveCpu, units='MHz'),
+                'cpuUsed': dict(value=cluster_usage.cpuUsedMHz, units='MHz'),
+                'memCapacity': dict(value=cluster_usage.memCapacityMB / 1024, units='GB'),
+                'memUsed': dict(value=cluster_usage.memUsedMB / 1024, units='GB'),
+                'numCpuCores': dict(value=cluster.summary.numCpuCores, units=None),
+                'numCpuThreads': dict(value=cluster.summary.numCpuThreads, units=None),
+                'storageUsed': dict(value=cluster_usage.storageUsedMB / 1024, units='GB'),
+                'storageCapacity': dict(value=cluster_usage.storageCapacityMB / 1024, units='GB'),
+                'effectiveMemory': dict(value=cluster.summary.effectiveMemory / 1024, units='GB'),
+                'numHosts': dict(value=cluster.summary.numHosts, units=None),
+                'numEffectiveHosts': dict(value=cluster.summary.numEffectiveHosts, units=None),
                 'overallStatus': cluster.summary.overallStatus,
                 'serverTimestamp': self.db_conn.CurrentTime()
             }
