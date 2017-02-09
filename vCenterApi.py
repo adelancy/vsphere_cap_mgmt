@@ -12,7 +12,7 @@ from errors import QueryIsEmptyError
 
 class VcenterApi(object):
     def __init__(self, vCenter_host, user, password, port=443, sample_period=20,
-                 start=None, time_interval=24*60):
+                 start=None, time_interval=60):
         """
         :param vCenter_host:
         :param user:
@@ -228,7 +228,13 @@ class VcenterApi(object):
             cpuUsageAvg=dict(counter='cpu.usage.average', units='percentage'),
             cpuUsageMax=dict(counter='cpu.usage.maximum', units='percentage'),
             memUsageAvg=dict(counter='mem.usage.average', units='percentage'),
-            memUsageMax=dict(counter='mem.usage.maximum', units='percentage')
+            memUsageMax=dict(counter='mem.usage.maximum', units='percentage'),
+            powerUsable=dict(counter='power.capacity.usable.average', units='watts'),
+            powerCap=dict(counter='power.powerCap.average', units='watts'),
+            powerUsage=dict(counter='power.capacity.usagePct.average', units='percentage'),
+            energy=dict(counter='power.energy.summation', units='joules'),
+            power=dict(counter='power.power.average', units='watts'),
+
         )
         return self.get_resource_performance_stats(esxi_host, keymap)
 
@@ -255,17 +261,18 @@ class VcenterApi(object):
                 'vmCount': len(datastore.vm),
                 'accessible ': datastore.summary.accessible,
                 'type': datastore.summary.type,
-                'timestamp': self.db_conn.CurrentTime()
+                'timestamp': self.db_conn.CurrentTime(),
+                #'performanceStats': self.get_datastore_performance_stats(datastore)
             }
             output.append(info)
         return output
 
-    def get_datastore_performance_stats(self, datastore):
-        keymap = dict(
-            usageAvg=dict(counter='datastore.write.average', units='kBps'),
-            UsageMax=dict(counter='datastore.read.average', units='kBps'),
-        )
-        return self.get_resource_performance_stats(datastore, keymap)
+    # def get_datastore_performance_stats(self, datastore):
+    #     keymap = dict(
+    #         usageAvg=dict(counter='datastore.write.average', units='kBps'),
+    #         usageMax=dict(counter='datastore.read.average', units='kBps'),
+    #     )
+    #     return self.get_resource_performance_stats(datastore, keymap)
 
     def get_compute_cluster_view(self):
         content = self.db_conn.content
@@ -478,8 +485,9 @@ class VcenterApi(object):
             datastoreIoReads=dict(counter='datastore.numberReadAveraged.average', units=None, instance='*'),
             datastoreLatWrite=dict(counter='datastore.totalWriteLatency.average', units='ms', instance='*'),
             datastoreLatRead=dict(counter='datastore.totalReadLatency.average', units='ms', instance='*'),
-            networkTx=dict(counter='net.transmitted.average', units='MB', instance='*'),
-            networkRx=dict(counter='net.received.average', units='MB', instance='*'),
+            networkTx=dict(counter='net.transmitted.average', units='kBps', instance='*'),
+            networkRx=dict(counter='net.received.average', units='kBps', instance='*'),
+            power=dict(counter='power.power.average', units='watts')
         )
 
         queue_stats = dict(
