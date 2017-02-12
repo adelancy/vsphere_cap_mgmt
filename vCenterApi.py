@@ -44,6 +44,9 @@ class VcenterApi(object):
 
         return conn
 
+    def disconnect_vSphere_connection(self):
+        connect.Disconnect(self.db_conn)
+
     def get_conn_search_index(self):
         return self.db_conn.content.searchIndex
 
@@ -509,8 +512,8 @@ class VcenterApi(object):
 
     def get_resource_performance_stats(self, resource_entity, keymap):
         out = dict()
-        out['start'] = self._start
-        out['end'] = self._end
+        out['queryStartTime'] = self._start
+        out['queryEndTime'] = self._end
 
         for k, v in keymap.items():
             try:
