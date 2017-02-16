@@ -12,7 +12,7 @@ from errors import QueryIsEmptyError
 
 class VcenterApi(object):
     def __init__(self, vCenter_host, user, password, port=443, sample_period=20,
-                 start=None, time_interval=60):
+                 start=None, time_interval=24*60):
         """
         :param vCenter_host:
         :param user:
@@ -241,11 +241,17 @@ class VcenterApi(object):
         )
         return self.get_resource_performance_stats(esxi_host, keymap)
 
-    def get_host_by_dns(self, dns_name=None, ip_address=None):
+    def get_host_by_dns(self, dns_name=None):
         try:
             return self.db_conn.content.searchIndex.FindByDnsName(dnsName=dns_name, vmSearch=False)
         except (AttributeError, TypeError):
-            return self.get_vm_by_ip(self.db_conn.content.searchIndex, self.vCenter_host)  # Todo: Fix
+            pass
+
+    def get_vm_by_dns(self, dns_name=None):
+        try:
+            return self.db_conn.content.searchIndex.FindByDnsName(dnsName=dns_name, vmSearch=True)
+        except (AttributeError, TypeError):
+            pass
 
     def get_datastores_view(self):
         # Search for all Datastores hosts
@@ -563,6 +569,7 @@ class VcenterApi(object):
         """
         results = self.build_perf_query((self.stat_check(counter_name)), 'aggregated', vm)
         avg_stat = float(mean(results[0].value[0].value))  # actual ready time in ms
+        # Sample period represents the time it takes to capture one sample.
         percent_stat = 100 * avg_stat / (self.sample_period * 1000)  # AVG % of sample time in ms that vm is ready
         max_stat = float(max(results[0].value[0].value))
         percent_max_stat = 100 * max_stat / (self.sample_period * 1000)
