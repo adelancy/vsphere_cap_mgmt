@@ -183,10 +183,15 @@ class VcenterApi(object):
         out = []
         # Verify hosts properties
         for host in esxi_hosts_container:
+            try:
+                domain = host.config.network.dnsConfig.searchDomain[0]
+            except IndexError:
+                domain = None
+
             info = {
                 'hostname': host.config.network.dnsConfig.hostName,
                 'cluster': host.parent.name,
-                'domain': host.config.network.dnsConfig.searchDomain[0],
+                'domain': domain,
                 # can be the .domainName property also if not blank
                 'vendor': host.summary.hardware.vendor,
                 'model': host.summary.hardware.model,
