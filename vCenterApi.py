@@ -185,11 +185,14 @@ class VcenterApi(object):
         for host in esxi_hosts_container:
             try:
                 domain = host.config.network.dnsConfig.searchDomain[0]
-            except IndexError:
+                hostname = host.config.network.dnsConfig.hostName
+                # Todo: update to remove host.config is None error
+            except (IndexError, AttributeError):
                 domain = None
+                hostname = None
 
             info = {
-                'hostname': host.config.network.dnsConfig.hostName,
+                'hostname': hostname,
                 'cluster': host.parent.name,
                 'domain': domain,
                 # can be the .domainName property also if not blank
