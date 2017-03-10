@@ -207,7 +207,7 @@ class VcenterApi(object):
                 'cpuUsage': dict(value=host.summary.quickStats.overallCpuUsage, units='MHz'),
                 'ramUsage': dict(value=host.summary.quickStats.overallMemoryUsage, units='MB'),  # MB
                 'cpuCapacity': dict(value=host.summary.hardware.cpuMhz, units='MHz'),
-                'ramCapacity': dict(value=host.summary.hardware.memorySize / pow(1024, 3), units='GB'),
+                'ramCapacity': dict(value=float(host.summary.hardware.memorySize) / pow(1024, 3), units='GB'),
                 'uptime': dict(value=host.summary.quickStats.uptime, units='seconds'),
                 'powerState': host.summary.runtime.powerState,
                 'connectionState': host.summary.runtime.connectionState,
@@ -279,17 +279,9 @@ class VcenterApi(object):
                 'accessible ': datastore.summary.accessible,
                 'type': datastore.summary.type,
                 'timestamp': self.db_conn.CurrentTime(),
-                #'performanceStats': self.get_datastore_performance_stats(datastore)
             }
             output.append(info)
         return output
-
-    # def get_datastore_performance_stats(self, datastore):
-    #     keymap = dict(
-    #         usageAvg=dict(counter='datastore.write.average', units='kBps'),
-    #         usageMax=dict(counter='datastore.read.average', units='kBps'),
-    #     )
-    #     return self.get_resource_performance_stats(datastore, keymap)
 
     def get_compute_cluster_view(self):
         content = self.db_conn.content
@@ -304,13 +296,13 @@ class VcenterApi(object):
                 'cpuCapacity': dict(value=cluster.summary.totalCpu, units='MHz'),
                 'effectiveCpu': dict(value=cluster.summary.effectiveCpu, units='MHz'),
                 'cpuUsed': dict(value=cluster_usage.cpuUsedMHz, units='MHz'),
-                'memCapacity': dict(value=cluster_usage.memCapacityMB / 1024, units='GB'),
-                'memUsed': dict(value=cluster_usage.memUsedMB / 1024, units='GB'),
+                'memCapacity': dict(value=float(cluster_usage.memCapacityMB) / 1024, units='GB'),
+                'memUsed': dict(value=float(cluster_usage.memUsedMB) / 1024, units='GB'),
                 'numCpuCores': dict(value=cluster.summary.numCpuCores, units=None),
                 'numCpuThreads': dict(value=cluster.summary.numCpuThreads, units=None),
-                'storageUsed': dict(value=cluster_usage.storageUsedMB / 1024, units='GB'),
-                'storageCapacity': dict(value=cluster_usage.storageCapacityMB / 1024, units='GB'),
-                'effectiveMemory': dict(value=cluster.summary.effectiveMemory / 1024, units='GB'),
+                'storageUsed': dict(value=float(cluster_usage.storageUsedMB) / 1024, units='GB'),
+                'storageCapacity': dict(value=float(cluster_usage.storageCapacityMB) / 1024, units='GB'),
+                'effectiveMemory': dict(value=float(cluster.summary.effectiveMemory) / 1024, units='GB'),
                 'numHosts': dict(value=cluster.summary.numHosts, units=None),
                 'numEffectiveHosts': dict(value=cluster.summary.numEffectiveHosts, units=None),
                 'overallStatus': cluster.summary.overallStatus,
@@ -451,9 +443,9 @@ class VcenterApi(object):
                 dict(
                     name=datastoreInfo.datastore.info.name,
                     url=datastoreInfo.datastore.info.url,
-                    committed=dict(value=float(datastoreInfo.committed / pow(1024, 3)), units='GB'),
-                    uncommitted=dict(value=float(datastoreInfo.uncommitted / pow(1024, 3)), units='GB'),
-                    unshared=dict(value=float(datastoreInfo.unshared / pow(1024, 3)), units='GB')
+                    committed=dict(value=(float(datastoreInfo.committed) / pow(1024, 3)), units='GB'),
+                    uncommitted=dict(value=(float(datastoreInfo.uncommitted) / pow(1024, 3)), units='GB'),
+                    unshared=dict(value=(float(datastoreInfo.unshared) / pow(1024, 3)), units='GB')
                 )
             )
         vm_hardware = resource_entity.config.hardware
@@ -461,7 +453,7 @@ class VcenterApi(object):
             if (each_vm_hardware.key >= 2000) and (each_vm_hardware.key < 3000):
                 vdisk = {
                     'label': each_vm_hardware.deviceInfo.label,
-                    'capacity': dict(value=each_vm_hardware.capacityInKB / 1024 / 1024, units='GB'),
+                    'capacity': dict(value=float(each_vm_hardware.capacityInKB) / 1024 / 1024, units='GB'),
                     'thinProvisioned': each_vm_hardware.backing.thinProvisioned,
                     'fileName': each_vm_hardware.backing.fileName,
                     'type': 'vDisk'
@@ -614,11 +606,11 @@ def mean(numbers):
     # return float(sum(numbers)) / max(len(numbers), 1)
 
 
-def convert_byte_units(bytes, unit='mega'):
+def convert_byte_units(val, unit='mega'):
     if unit == 'kilo':
-        return bytes / 1024
+        return float(val) / 1024
     if unit == 'mega':
-        return bytes / 1024 / 1024
+        return float(val) / 1024 / 1024
     if unit == 'giga':
-        return bytes / 1024 / 1024 / 1024
-    return bytes
+        return float(val) / 1024 / 1024 / 1024
+    return float(val)
