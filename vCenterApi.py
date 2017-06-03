@@ -194,6 +194,7 @@ class VcenterApi(object):
             info = {
                 'hostname': hostname,
                 'cluster': host.parent.name,
+                'vms': host.vm,  # List of associated Virtual Machines
                 'domain': domain,
                 # can be the .domainName property also if not blank
                 'vendor': host.summary.hardware.vendor,
@@ -202,7 +203,7 @@ class VcenterApi(object):
                 'cpuCores': dict(value=host.summary.hardware.numCpuCores, units=None),
                 'cpuThreads': dict(value=host.summary.hardware.numNics, units=None),
                 'runtime': dict(value=host.RetrieveHardwareUptime() / (60 * 60 * 24), units='days'),
-                'idInfo': self.parse_host_idinfo(host.summary.hardware.otherIdentifyingInfo),
+                'idInfo': parse_host_id_info(host.summary.hardware.otherIdentifyingInfo),
                 'status': host.summary.overallStatus,
                 'cpuUsage': dict(value=host.summary.quickStats.overallCpuUsage, units='MHz'),
                 'ramUsage': dict(value=host.summary.quickStats.overallMemoryUsage, units='MB'),  # MB
@@ -217,15 +218,6 @@ class VcenterApi(object):
             }
             out.append(info)
         return out
-
-    def parse_host_idinfo(self, id_info):
-        output = dict()
-        for info in id_info:
-            if info.identifierType.key == 'AssetTag':
-                output['assetTag'] = info.identifierValue
-            if info.identifierType.key == 'ServiceTag':
-                output['serviceTag'] = info.identifierValue
-        return output
 
     def get_esxi_host_performance_stats(self, esxi_host):
         """
@@ -290,7 +282,10 @@ class VcenterApi(object):
     def get_cluster_capacity_details(self, clusters):
         output = []
         for cluster in clusters:
-            cluster_usage = cluster.GetResourceUsage()
+            try:
+                cluster_usage = cluster.GetResourceUsage()
+            except vmodl.fault.MethodNotFound:
+                return output
             cluster_info = {
                 'name': cluster.name,
                 'cpuCapacity': dict(value=cluster.summary.totalCpu, units='MHz'),
@@ -401,6 +396,12 @@ class VcenterApi(object):
                                                              type='cluster-datastore-slots')
         return cluster_datastore_slots
 
+    def get_capacity_details_for_vms(self, vms):
+        output = []
+        for resource_entity in vms:
+            output.append(self.get_vm_capacity_details(resource_entity))
+        return output
+
     def get_vm_capacity_details(self, resource_entity):
         output = dict()
         summary = resource_entity.summary
@@ -408,6 +409,7 @@ class VcenterApi(object):
         output['vNICs'] = []
 
         output['uuid'] = resource_entity.config.instanceUuid  # vCenter globally unique ID
+        output['template'] = resource_entity.config.template
         output['powerState'] = resource_entity.runtime.powerState
         output['host'] = resource_entity.summary.runtime.host.summary.config.name
         output['cpuUsage'] = dict(value=resource_entity.summary.quickStats.overallCpuUsage, units='MHz')
@@ -603,7 +605,6 @@ def mean(numbers):
     """
     vector = np.array(numbers)
     return np.mean(vector)
-    # return float(sum(numbers)) / max(len(numbers), 1)
 
 
 def convert_byte_units(val, unit='mega'):
@@ -614,3 +615,14 @@ def convert_byte_units(val, unit='mega'):
     if unit == 'giga':
         return float(val) / 1024 / 1024 / 1024
     return float(val)
+
+
+def parse_host_id_info(id_info):
+    output = dict()
+    for info in id_info:
+        if info.identifierType.key == 'AssetTag':
+            output['assetTag'] = info.identifierValue
+        if info.identifierType.key == 'ServiceTag':
+            output['serviceTag'] = info.identifierValue
+    return output
+

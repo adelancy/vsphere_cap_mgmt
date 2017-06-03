@@ -7,8 +7,8 @@ from vCenterApi import VcenterApi
 class TestVmwareScripts(unittest.TestCase):
 
     def setUp(self):
-        self.test_host = '10.12.30.20'
-        self.api = VcenterApi(vCenter_host=self.test_host, user='splab\captest', password='Password1234!', port=443,
+        self.test_host = '10.12.30.11'
+        self.api = VcenterApi(vCenter_host=self.test_host, user='adrian', password='Password123', port=443,
                               sample_period=20, time_interval=1)
 
     def tearDown(self):
