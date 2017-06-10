@@ -195,8 +195,8 @@ class VcenterApi(object):
                 'hostname': hostname,
                 'cluster': host.parent.name,
                 'vms': host.vm,  # List of associated Virtual Machines
-                'domain': domain,
-                # can be the .domainName property also if not blank
+                'domain': domain,  # can be the .domainName property also if not blank
+                'datastores': host.datastore,
                 'vendor': host.summary.hardware.vendor,
                 'model': host.summary.hardware.model,
                 'cpuModel': host.summary.hardware.cpuModel,
