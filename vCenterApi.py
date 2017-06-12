@@ -169,7 +169,7 @@ class VcenterApi(object):
         counter_key = self.perf_dict[counter_name]
         return counter_key
 
-    def get_esxi_hosts_info(self):
+    def get_all_esxi_hosts(self):
         """
         Returns a view container that has the information on the esxi hosts. Access the view property to get the list
         of esix hosts.
@@ -177,7 +177,7 @@ class VcenterApi(object):
         """
         # Search for all ESXi hosts
         content = self.db_conn.content
-        return content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
+        return content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True).view
 
     def get_esxi_hosts_capacity_details(self, esxi_hosts_container):
         out = []
@@ -214,7 +214,8 @@ class VcenterApi(object):
                 'connectionState': host.summary.runtime.connectionState,
                 'vDiskMaxCapacity': dict(value=host.summary.runtime.hostMaxVirtualDiskCapacity, units=None),
                 'serverTimestamp': self.db_conn.CurrentTime(),
-                'performanceStats': self.get_esxi_host_performance_stats(host)
+                'performanceStats': self.get_esxi_host_performance_stats(host),
+                'raw': host
             }
             out.append(info)
         return out
@@ -222,7 +223,7 @@ class VcenterApi(object):
     def get_esxi_host_performance_stats(self, esxi_host):
         """
         By default provides average values over the last 60 minutes
-        :param esxi_host:
+        :param esxi_host: pyVmomi HostSystem Managed Entity
         :param interval:
         :param kwargs:
         :return:
@@ -236,8 +237,7 @@ class VcenterApi(object):
             powerCap=dict(counter='power.powerCap.average', units='watts'),
             powerUsage=dict(counter='power.capacity.usagePct.average', units='percentage'),
             energy=dict(counter='power.energy.summation', units='joules'),
-            power=dict(counter='power.power.average', units='watts'),
-
+            power=dict(counter='power.power.average', units='watts')
         )
         return self.get_resource_performance_stats(esxi_host, keymap)
 
@@ -271,6 +271,7 @@ class VcenterApi(object):
                 'accessible ': datastore.summary.accessible,
                 'type': datastore.summary.type,
                 'timestamp': self.db_conn.CurrentTime(),
+                'raw': datastore
             }
             output.append(info)
         return output
@@ -284,26 +285,27 @@ class VcenterApi(object):
         for cluster in clusters:
             try:
                 cluster_usage = cluster.GetResourceUsage()
+                cluster_info = {
+                    'name': cluster.name,
+                    'cpuCapacity': dict(value=cluster.summary.totalCpu, units='MHz'),
+                    'effectiveCpu': dict(value=cluster.summary.effectiveCpu, units='MHz'),
+                    'cpuUsed': dict(value=cluster_usage.cpuUsedMHz, units='MHz'),
+                    'memCapacity': dict(value=float(cluster_usage.memCapacityMB) / 1024, units='GB'),
+                    'memUsed': dict(value=float(cluster_usage.memUsedMB) / 1024, units='GB'),
+                    'numCpuCores': dict(value=cluster.summary.numCpuCores, units=None),
+                    'numCpuThreads': dict(value=cluster.summary.numCpuThreads, units=None),
+                    'storageUsed': dict(value=float(cluster_usage.storageUsedMB) / 1024, units='GB'),
+                    'storageCapacity': dict(value=float(cluster_usage.storageCapacityMB) / 1024, units='GB'),
+                    'effectiveMemory': dict(value=float(cluster.summary.effectiveMemory) / 1024, units='GB'),
+                    'numHosts': dict(value=cluster.summary.numHosts, units=None),
+                    'numEffectiveHosts': dict(value=cluster.summary.numEffectiveHosts, units=None),
+                    'overallStatus': cluster.summary.overallStatus,
+                    'serverTimestamp': self.db_conn.CurrentTime(),
+                    'raw': cluster
+                }
+                output.append(cluster_info)
             except vmodl.fault.MethodNotFound:
-                return output
-            cluster_info = {
-                'name': cluster.name,
-                'cpuCapacity': dict(value=cluster.summary.totalCpu, units='MHz'),
-                'effectiveCpu': dict(value=cluster.summary.effectiveCpu, units='MHz'),
-                'cpuUsed': dict(value=cluster_usage.cpuUsedMHz, units='MHz'),
-                'memCapacity': dict(value=float(cluster_usage.memCapacityMB) / 1024, units='GB'),
-                'memUsed': dict(value=float(cluster_usage.memUsedMB) / 1024, units='GB'),
-                'numCpuCores': dict(value=cluster.summary.numCpuCores, units=None),
-                'numCpuThreads': dict(value=cluster.summary.numCpuThreads, units=None),
-                'storageUsed': dict(value=float(cluster_usage.storageUsedMB) / 1024, units='GB'),
-                'storageCapacity': dict(value=float(cluster_usage.storageCapacityMB) / 1024, units='GB'),
-                'effectiveMemory': dict(value=float(cluster.summary.effectiveMemory) / 1024, units='GB'),
-                'numHosts': dict(value=cluster.summary.numHosts, units=None),
-                'numEffectiveHosts': dict(value=cluster.summary.numEffectiveHosts, units=None),
-                'overallStatus': cluster.summary.overallStatus,
-                'serverTimestamp': self.db_conn.CurrentTime()
-            }
-            output.append(cluster_info)
+                pass
         return output
 
     @classmethod
@@ -318,85 +320,12 @@ class VcenterApi(object):
                     output.append(vm)
         return output
 
-    def get_cpu_slots_available(self, clusters):  # Todo: Modify to remove two hosts
-        #  1. Get total CPU MHz for all VM Hosts in cluster
-        #  2. Get total CPU MHz used by VM Hosts in cluster
-        #  3. Calculate 90% of the total cpu mhz
-        #  4. Calculate CPU MHz available by subtracting used from total
-        #  5. Divide Available CPU MHz by average cluster VM CPU usage
-        cluster_cpu_slots = dict()
-        for cluster in clusters:
-            total_eff_cpu = cluster.summary.effectiveCpu * 0.9  # 10% padding
-            total_used_cpu = cluster.GetResourceUsage().cpuUsedMHz
-            total_available_cpu = total_eff_cpu - total_used_cpu
-            if total_available_cpu <= 0:
-                return 0
-            vms = self.get_cluster_vms(cluster)
-            vm_cpu_usage_vals = []
-            for vm in vms:
-                if vm.summary.quickStats.overallCpuDemand != 0:
-                    vm_cpu_usage_vals.append(vm.summary.quickStats.overallCpuDemand)
-            try:
-                avg_vm_cpu_usage = sum(vm_cpu_usage_vals) / len(vm_cpu_usage_vals)
-                slots = total_available_cpu / avg_vm_cpu_usage
-                cluster_cpu_slots[cluster.name] = dict(metric=avg_vm_cpu_usage, unit='MHz', slots=slots,
-                                                       type='cluster-cpu-slots')
-            except ZeroDivisionError as error:
-                print('Cluster has no active VMs ' + error.message)  # Todo: Add logging
-                cluster_cpu_slots[cluster.name] = dict(slots='unlimited', metric=None, unit=None,
-                                                       type='cluster-cpu-slots')
-        return cluster_cpu_slots
-
-    def get_memory_slots_available(self, clusters):
-        cluster_mem_slots = dict()
-        for cluster in clusters:
-            cluster_usage = cluster.GetResourceUsage()
-            total_mem = cluster.summary.effectiveMemory * 0.9  # Pad the capacity for more conservative est
-            total_used_mem = cluster_usage.memUsedMB
-            available_mem = total_mem - total_used_mem
-            # Get the usage across all vms in cluster to calculate average vm usage
-            vms = self.get_cluster_vms(cluster)
-            vms_mem_values_tmp = [x.summary.quickStats.guestMemoryUsage for x in vms]
-            vms_mem_values = filter(lambda mem: mem > 0, vms_mem_values_tmp)
-            try:
-                avg_vm_mem_usage = sum(vms_mem_values) / len(vms_mem_values)  # calculate what a mem slot is
-                slots = available_mem / avg_vm_mem_usage
-                cluster_mem_slots[cluster.name] = dict(slots=slots, metric=avg_vm_mem_usage,
-                                                       unit='MB', type='cluster-mem-slots')
-            except ZeroDivisionError:
-                print('Cluster {0} has no VMs'.format(cluster.name))
-                cluster_mem_slots[cluster.name] = dict(slots='unlimited', metric=None,
-                                                       unit=None, type='cluster-mem-slots')
-        return cluster_mem_slots
-
-    def get_datastore_slots_available(self, clusters):
-        cluster_datastore_slots = dict()
-        for cluster in clusters:
-            usage_info = cluster.GetResourceUsage()
-            total_capacity = usage_info.storageCapacityMB * 0.95
-            used = usage_info.storageUsedMB
-            available = total_capacity - used
-            # Calculate VM average
-            vms = self.get_cluster_vms(cluster)
-            vm_storage_vals = []
-            for vm in vms:  # Todo: comitted + uncomitted
-                used = 0
-                for datastore in vm.storage.perDatastoreUsage:
-                    used = used + datastore.committed + datastore.uncommitted  # Units - Bytes
-                vm_storage_vals.append(used)
-
-            # Calculate average
-            avg_vm_datastore_usage = convert_byte_units(mean(vm_storage_vals), unit='mega')
-            try:
-                slots = available / avg_vm_datastore_usage
-                cluster_datastore_slots[cluster.name] = dict(slots=slots, metric=avg_vm_datastore_usage,
-                                                             unit='MB', type='cluster-datastore-slots')
-            except ZeroDivisionError:
-                cluster_datastore_slots[cluster.name] = dict(slots='unlimited', metric=None, unit=None,
-                                                             type='cluster-datastore-slots')
-        return cluster_datastore_slots
-
     def get_capacity_details_for_vms(self, vms):
+        """
+        Returns the capacity performance details for a list of VMs
+        :param [] vms:
+        :return:
+        """
         output = []
         for resource_entity in vms:
             output.append(self.get_vm_capacity_details(resource_entity))
@@ -472,6 +401,7 @@ class VcenterApi(object):
                 output['vNICs'].append(vnetwork_device)
         output['timestamp'] = self.db_conn.CurrentTime()
         output['performanceStats'] = self.get_vm_performance_stats(resource_entity)
+        output['raw'] = resource_entity
         return output
 
     def get_vm_performance_stats(self, resource_entity):
@@ -548,23 +478,30 @@ class VcenterApi(object):
         except QueryIsEmptyError:
             pass
 
-    def get_avg_cpu_ready(self, vms):
+    def get_cpu_stat_moments(self, vms, counter_name='cpu.ready.summation'):
+        """
+        Returns the arithmetic mean and standard deviation of a distribution of values for a cpu counter
+        :param vms:
+        :param counter_name:
+        :return:
+        """
         vals = []
         percent_ready_vals = []
         for vm in vms:
             try:
-                cpu_ready = self.get_cpu_queue_stats(vm)['average']['stat']['value']
-                percent_ready = self.get_cpu_queue_stats(vm)['average']['percentStat']['value']
+                stats = self.get_cpu_queue_stats(vm, counter_name)['average']
+                cpu_ready = stats['stat']['value']
+                percent_ready = stats['percentStat']['value']
                 if cpu_ready:
                     vals.append(cpu_ready)
                     percent_ready_vals.append(percent_ready)
             except (AttributeError, TypeError, QueryIsEmptyError):
                 pass
-        return mean(vals), mean(percent_ready_vals)
+        return mean(vals), mean(percent_ready_vals), standard_deviation(vals), standard_deviation(percent_ready_vals)
 
     def get_cpu_queue_stats(self, vm, counter_name='cpu.ready.summation'):
         """
-        Design to calculate stats for queing time
+        Design to calculate stats for queuing time
         :param vm:
         :param counter_name:
         :return:
@@ -593,6 +530,112 @@ class VcenterApi(object):
         )
         return output
 
+    def get_available_host_vcpus(self, host):
+        """
+        Computes the available estimated vCPUs that the host can support based on current VM usage
+        :param HostSystem host:
+        :return:
+        """
+        vms = host.vm
+        vcpu_count = sum([vm.summary.config.numCpu for vm in vms])
+        #  Check against vSphere scheduling algorithm limits
+        if len(vms) > int(0.9 * 512) or vcpu_count > int(0.9 * 1024):
+            return 0
+
+        # Calculate statistical moments for VM cpu performance values
+        array = []
+        for vm in host.vm:
+            try:
+                cpu_ready = self.get_cpu_queue_stats(vm)['average']
+                costop = self.get_cpu_queue_stats(vm, 'cpu.costop.summation')['average']
+                vcpu_usage = vm.summary.quickStats.overallCpuUsage  # MHz
+                stats = {
+                    'cpu_ready': cpu_ready['stat']['value'],
+                    'percent_cpu_ready': cpu_ready['percentStat']['value'],
+                    'costop': costop['stat']['value'],
+                    'percent_costop': costop['percentStat']['value'],
+                    'vcpu_usage': vcpu_usage
+                }
+                array.append(stats)
+            except QueryIsEmptyError:
+                pass
+
+        avg_percent_ready = mean([x['percent_cpu_ready'] for x in array])
+        std_percent_ready = standard_deviation([x['percent_cpu_ready'] for x in array])
+
+        avg_percent_costop = mean([x['percent_cpu_ready'] for x in array])
+        std_percent_costop = standard_deviation([x['percent_cpu_ready'] for x in array])
+
+        # Threshold statistical values
+        # print 'avg percent ready is {0}'.format(avg_percent_ready + std_percent_ready)
+        if (avg_percent_ready + std_percent_ready) > 5:
+            return 0
+        if (avg_percent_costop + std_percent_costop) > 3:
+            return 0
+        vcpu_usage_vals = [x['vcpu_usage'] for x in array]
+        non_zero_vcpu_usage = filter(lambda usage: usage > 0, vcpu_usage_vals)
+        avg_vm_cpu_usage = mean(non_zero_vcpu_usage)
+        std_vm_cpu_usage = standard_deviation(non_zero_vcpu_usage)
+        # Calculate number of slots based on usage
+        est_vcpu_usage = avg_vm_cpu_usage + 0.5 * std_vm_cpu_usage
+        # print non_zero_vcpu_usage
+        # print avg_vm_cpu_usage, std_vm_cpu_usage
+        try:
+            host_cpu_slots = round(host.summary.quickStats.overallCpuUsage / est_vcpu_usage, 0)
+        except ZeroDivisionError:
+            host_cpu_slots = round(0.9 * 1024, 0)  # Theoretical Upper bound on vCPus available to provision
+
+        return dict(value=host_cpu_slots, units='vCPU')
+
+    def get_memory_slots_available(self, host):
+        """
+        Calculates the available VM provisioning capacity of a host based on memory slots
+        :param host:
+        :return:
+        """
+        vms = host.vm
+        # Calculate average vm memory usage:
+        vms_mem_values_tmp = [x.summary.quickStats.guestMemoryUsage for x in vms]
+        vms_mem_values = filter(lambda mem: mem > 0, vms_mem_values_tmp)
+        available_host_ram = float(host.summary.hardware.memorySize) - host.summary.quickStats.overallMemoryUsage
+        try:
+            avg_vm_mem_usage = 0.9 * mean(vms_mem_values)  # calculate what a mem slot is
+            slots = available_host_ram / avg_vm_mem_usage
+            return dict(value=slots, metric=avg_vm_mem_usage, unit='mem-slots')
+        except ZeroDivisionError:
+            print('Host {0} has no VMs'.format(host.name))
+            return dict(value=float('inf'), metric=None, unit=None)
+
+    def get_datastore_slots_available(self, clusters):
+        """
+        Calculates the available VM provisioning ability for accross all datastores in use by a cluster
+        :param clusters:
+        :return:
+        """
+        cluster_datastore_slots = dict()
+        for cluster in clusters:
+            usage_info = cluster.GetResourceUsage()
+            total_capacity = usage_info.storageCapacityMB * 0.95
+            used = usage_info.storageUsedMB
+            available = total_capacity - used
+            # Calculate VM average
+            vms = self.get_cluster_vms(cluster)
+            vm_storage_vals = []
+            for vm in vms:
+                used = 0
+                for datastore in vm.storage.perDatastoreUsage:
+                    used = used + datastore.committed + datastore.uncommitted  # Units - Bytes
+                vm_storage_vals.append(used)
+
+            # Calculate average
+            avg_vm_datastore_usage = convert_byte_units(mean(vm_storage_vals), unit='mega')
+            try:
+                slots = available / avg_vm_datastore_usage
+                cluster_datastore_slots[cluster.name] = dict(slots=slots, units='cluster-datastore-slots')
+            except ZeroDivisionError:
+                cluster_datastore_slots[cluster.name] = dict(slots=float('inf'), units='cluster-datastore-slots')
+        return cluster_datastore_slots
+
 
 def get_epoch_value():
     return (datetime.utcnow() - datetime(1970, 1, 1)).seconds
@@ -600,11 +643,19 @@ def get_epoch_value():
 
 def mean(numbers):
     """
-    Calculates the arithmetic mean of an array of numbers
+    Calculates the arithmetic mean of an array of numerical values
     :param numbers:  list of number
     """
-    vector = np.array(numbers)
-    return np.mean(vector)
+    return np.mean(np.array(numbers))
+
+
+def standard_deviation(numbers):
+    """
+    Computes the standard deviation of an array of numerical values
+    :param numbers:
+    :return:
+    """
+    return np.std(np.array(numbers))
 
 
 def convert_byte_units(val, unit='mega'):
