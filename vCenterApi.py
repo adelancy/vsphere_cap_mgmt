@@ -84,8 +84,14 @@ class VcenterApi(object):
     def get_vm_by_ip(self, search_index, ip_address):
         return search_index.FindByIp(None, ip_address, True)
 
+    def get_vm_by_dns(self, dns_name=None):
+        try:
+            return self.db_conn.content.searchIndex.FindByDnsName(dnsName=dns_name, vmSearch=True)
+        except (AttributeError, TypeError):
+            pass
+
     def get_esxi_host_by_name(self):
-        pass
+        raise NotImplementedError
 
     def execute_perf_query(self, counter_name, **kwargs):
         return self.build_perf_query(counter_id=self.stat_check(counter_name=counter_name), **kwargs)
@@ -207,7 +213,7 @@ class VcenterApi(object):
                 'status': host.summary.overallStatus,
                 'cpuUsage': dict(value=host.summary.quickStats.overallCpuUsage, units='MHz'),
                 'ramUsage': dict(value=host.summary.quickStats.overallMemoryUsage, units='MB'),  # MB
-                'cpuCapacity': dict(value=host.summary.hardware.cpuMhz, units='MHz'),
+                'cpuCapacity': dict(value=host.summary.hardware.cpuMhz * host.summary.hardware.numCpuCores, units='MHz'),
                 'ramCapacity': dict(value=float(host.summary.hardware.memorySize) / pow(1024, 3), units='GB'),
                 'uptime': dict(value=host.summary.quickStats.uptime, units='seconds'),
                 'powerState': host.summary.runtime.powerState,
@@ -244,12 +250,6 @@ class VcenterApi(object):
     def get_host_by_dns(self, dns_name=None):
         try:
             return self.db_conn.content.searchIndex.FindByDnsName(dnsName=dns_name, vmSearch=False)
-        except (AttributeError, TypeError):
-            pass
-
-    def get_vm_by_dns(self, dns_name=None):
-        try:
-            return self.db_conn.content.searchIndex.FindByDnsName(dnsName=dns_name, vmSearch=True)
         except (AttributeError, TypeError):
             pass
 
@@ -560,32 +560,44 @@ class VcenterApi(object):
             except QueryIsEmptyError:
                 pass
 
-        avg_percent_ready = mean([x['percent_cpu_ready'] for x in array])
-        std_percent_ready = standard_deviation([x['percent_cpu_ready'] for x in array])
-
-        avg_percent_costop = mean([x['percent_cpu_ready'] for x in array])
-        std_percent_costop = standard_deviation([x['percent_cpu_ready'] for x in array])
-
+        out = dict()
+        out['cpu_ready'] = {
+            'mean': dict(value=mean([x['percent_cpu_ready'] for x in array]), units='%'),
+            'stdv': dict(value=standard_deviation([x['percent_cpu_ready'] for x in array]), units='%')
+        }
+        out['cpu_costop'] = {
+            'mean': dict(value=mean([x['percent_cpu_ready'] for x in array]), units='%'),
+            'stdv': dict(value=standard_deviation([x['percent_cpu_ready'] for x in array]), units='%')
+        }
         # Threshold statistical values
         # print 'avg percent ready is {0}'.format(avg_percent_ready + std_percent_ready)
-        if (avg_percent_ready + std_percent_ready) > 5:
-            return 0
-        if (avg_percent_costop + std_percent_costop) > 3:
-            return 0
+        if (out['cpu_ready']['mean']['value'] + out['cpu_ready']['stdv']['value']) > 5:
+            out['cpu_slots'] = dict(value=0, units='vCPU')
+            return out
+        if (out['cpu_costop']['mean']['value'] + out['cpu_costop']['stdv']['value']) > 3:
+            out['cpu_slots'] = dict(value=0, units='vCPU')
+            return out
+        # Calculate available vCPU provisioning capacity
         vcpu_usage_vals = [x['vcpu_usage'] for x in array]
         non_zero_vcpu_usage = filter(lambda usage: usage > 0, vcpu_usage_vals)
-        avg_vm_cpu_usage = mean(non_zero_vcpu_usage)
-        std_vm_cpu_usage = standard_deviation(non_zero_vcpu_usage)
+        out['vm_cpu_usage'] = {
+            'mean': dict(value=mean(non_zero_vcpu_usage), units='MHz'),
+            'stdv': dict(value=standard_deviation(non_zero_vcpu_usage), units='MHz')
+        }
         # Calculate number of slots based on usage
-        est_vcpu_usage = avg_vm_cpu_usage + 0.5 * std_vm_cpu_usage
-        # print non_zero_vcpu_usage
-        # print avg_vm_cpu_usage, std_vm_cpu_usage
+        est_vcpu_usage = out['vm_cpu_usage']['mean']['value'] + 0.5 * out['vm_cpu_usage']['stdv']['value']
+        host_cpu_capacity = (host.summary.hardware.cpuMhz * host.summary.hardware.numCpuCores)
+        available_host_cpu = host_cpu_capacity - host.summary.quickStats.overallCpuUsage
         try:
-            host_cpu_slots = round(host.summary.quickStats.overallCpuUsage / est_vcpu_usage, 0)
+            out['cpu_slots'] = dict(
+                value=round(available_host_cpu / est_vcpu_usage, 0),
+                units='vCPU'
+            )
         except ZeroDivisionError:
-            host_cpu_slots = round(0.9 * 1024, 0)  # Theoretical Upper bound on vCPus available to provision
+            # Theoretical Upper bound on vCPus available to provision
+            out['cpu_slots'] = dict(value=round(0.9 * 1024, 0), units='vCPU')
 
-        return dict(value=host_cpu_slots, units='vCPU')
+        return out
 
     def get_memory_slots_available(self, host):
         """
@@ -601,14 +613,14 @@ class VcenterApi(object):
         try:
             avg_vm_mem_usage = 0.9 * mean(vms_mem_values)  # calculate what a mem slot is
             slots = available_host_ram / avg_vm_mem_usage
-            return dict(value=slots, metric=avg_vm_mem_usage, unit='mem-slots')
+            return dict(value=slots, unit='mem-slots')
         except ZeroDivisionError:
             print('Host {0} has no VMs'.format(host.name))
-            return dict(value=float('inf'), metric=None, unit=None)
+            return dict(value=float('inf'), unit=None)
 
     def get_datastore_slots_available(self, clusters):
         """
-        Calculates the available VM provisioning ability for accross all datastores in use by a cluster
+        Calculates the available VM provisioning ability for across all datastores in use by a cluster
         :param clusters:
         :return:
         """
