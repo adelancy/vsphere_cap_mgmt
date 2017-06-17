@@ -7,18 +7,21 @@ from pyVmomi import vmodl
 from pyVmomi import vim
 import numpy as np
 
-from errors import QueryIsEmptyError
+from errors import QueryIsEmptyError, HostConnectionError
 
 
 class VcenterApi(object):
     def __init__(self, vCenter_host, user, password, port=443, sample_period=20,
                  start=None, time_interval=24*60):
         """
-        :param vCenter_host:
-        :param user:
-        :param password:
-        :param port:
-        :param sample_period: Sampling period in seconds
+        This class provides an API to interact with VSphere using it's REST API. This is a wrapper class around the
+        PyVmomi library primarily to get access to the top level managed entities and query capacity information.
+
+        :param vCenter_host: IP Address or Hostname of the vCenter instance to connect to.
+        :param user: vSphere username to login as.
+        :param password: vSphere password
+        :param port: Port to connect to the vCenter instance on. Defaults to SSL port 443
+        :param sample_period: Sampling period in seconds used by vSphere to collect data points.
         :param time_interval: Time interval to query for in minutes
         """
         self.vCenter_host = vCenter_host
@@ -32,6 +35,14 @@ class VcenterApi(object):
 
     @classmethod
     def create_vSphere_connection(cls, host, user, password, port):
+        """
+        Class method used to create connection to a vCenter instance over an HTTPS session.
+        :param host:  Hostname or IP Address of target vCenter instance
+        :param user: Username
+        :param password: Password
+        :param port: Port to connect to vCenter instance on
+        :return: A vSphere connection object
+        """
         # form a connection...
         context = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
         context.verify_mode = ssl.CERT_NONE
@@ -45,24 +56,36 @@ class VcenterApi(object):
         return conn
 
     def disconnect_vSphere_connection(self):
+        """
+        Disconnects the connected vCenter instance.
+        :return:
+        """
         connect.Disconnect(self.db_conn)
 
     def get_conn_search_index(self):
         return self.db_conn.content.searchIndex
 
     def set_query_time_window(self, start=None, time_interval=24*60):
+        """
+        Specify the timewindow to query vCenter for.
+
+        :param DateTime start: Query start time as a python datetime object
+        :param time_interval: The time interval to add to the query start time i.e. 4 hours, 1 day etc...
+        :return: A tupple with the start and end datetimes.
+        """
         if start is None:
             start = self.db_conn.CurrentTime()
         self._start = start - timedelta(minutes=time_interval+1)
         self._end = start - timedelta(minutes=1)
         return self._start, self._end
 
-    def get_all_vms_view(self, recursive=True, view_type=None):
+    def get_view_container(self, recursive=True, view_type=None):
         """
-        Builds the container view object that represents the list of VMs from the vSphere Connection passed.
-        :param db_conn: Vsphere Connection
-        :param recursive:
-        :param view_type:
+        Builds the container view object that represents the list of vSphere managed entities of the view_type passed in
+        from the vCenter instance currently connected.
+
+        :param Boolean recursive: Flag to indicate how to build the container object.
+        :param view_type: Managed Entity i.e. VirtualMachine, HostSystem etc... Defaults to VirtualMachine
         :return:
         """
         try:
@@ -71,17 +94,32 @@ class VcenterApi(object):
             if view_type is None:
                 view_type = [vim.VirtualMachine]
             return content.viewManager.CreateContainerView(container, view_type, recursive)
-            # return containerView.view
         except vmodl.MethodFault as error:
-            raise error('Caught vm')
+            raise error('Problem connecting to a VM')
 
     def get_all_vms(self):
-        return self.get_all_vms_view().view
+        """
+        Returns all VMs associated with the connected vCenter instance.
+        :return: A list of VM Managed Entity objects
+        """
+        return self.get_view_container().view
 
     def get_vm_by_uuid(self, uuid):
+        """
+        Query a VM by its vCenter UUID.
+        :param uuid: vCenter Unique Identifier
+        :return:
+        """
         return self.db_conn.content.searchIndex.FindByUuid(None, uuid, True, True)
 
     def get_vm_by_ip(self, search_index, ip_address):
+        """
+        Query a VM by it's IP address.
+
+        :param search_index:
+        :param ip_address:
+        :return:
+        """
         return search_index.FindByIp(None, ip_address, True)
 
     def get_vm_by_dns(self, dns_name=None):
@@ -90,7 +128,7 @@ class VcenterApi(object):
         except (AttributeError, TypeError):
             pass
 
-    def get_esxi_host_by_name(self):
+    def get_esxi_host_by_name(self, hostname):
         raise NotImplementedError
 
     def execute_perf_query(self, counter_name, **kwargs):
@@ -140,7 +178,7 @@ class VcenterApi(object):
     def get_vm_properties(self, managed_obj=None, props=None, property_type=vim.VirtualMachine):
         content = self.db_conn.content
         if managed_obj is None:
-            managed_obj = self.get_all_vms_view()
+            managed_obj = self.get_view_container()
         # Build a view and get basic properties for all Virtual Machines
         t_spec = vim.PropertyCollector.TraversalSpec(name='tSpecName', path='view', skip=False,
                                                      type=vim.view.ContainerView)
@@ -185,19 +223,22 @@ class VcenterApi(object):
         content = self.db_conn.content
         return content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True).view
 
-    def get_esxi_hosts_capacity_details(self, esxi_hosts_container):
+    def get_esxi_hosts_capacity(self, hosts):
         out = []
-        # Verify hosts properties
-        for host in esxi_hosts_container:
-            try:
-                domain = host.config.network.dnsConfig.searchDomain[0]
-                hostname = host.config.network.dnsConfig.hostName
-                # Todo: update to remove host.config is None error
-            except (IndexError, AttributeError):
-                domain = None
-                hostname = None
+        for host in hosts:
+            out.append(self.get_esxi_host_capacity_details(host))
+        return out
 
-            info = {
+    def get_esxi_host_capacity_details(self, host):
+        try:
+            domain = host.config.network.dnsConfig.searchDomain[0]
+            hostname = host.config.network.dnsConfig.hostName
+            # Todo: update to remove host.config is None error
+        except (IndexError, AttributeError):
+            domain = None
+            hostname = None
+        try:
+            return {
                 'hostname': hostname,
                 'cluster': host.parent.name,
                 'vms': host.vm,  # List of associated Virtual Machines
@@ -213,7 +254,8 @@ class VcenterApi(object):
                 'status': host.summary.overallStatus,
                 'cpuUsage': dict(value=host.summary.quickStats.overallCpuUsage, units='MHz'),
                 'ramUsage': dict(value=host.summary.quickStats.overallMemoryUsage, units='MB'),  # MB
-                'cpuCapacity': dict(value=host.summary.hardware.cpuMhz * host.summary.hardware.numCpuCores, units='MHz'),
+                'cpuCapacity': dict(value=host.summary.hardware.cpuMhz * host.summary.hardware.numCpuCores,
+                                    units='MHz'),
                 'ramCapacity': dict(value=float(host.summary.hardware.memorySize) / pow(1024, 3), units='GB'),
                 'uptime': dict(value=host.summary.quickStats.uptime, units='seconds'),
                 'powerState': host.summary.runtime.powerState,
@@ -223,8 +265,9 @@ class VcenterApi(object):
                 'performanceStats': self.get_esxi_host_performance_stats(host),
                 'raw': host
             }
-            out.append(info)
-        return out
+
+        except vmodl.fault.HostCommunication:
+            raise HostConnectionError('Problem vCenter connection to Host, please investigate!')
 
     def get_esxi_host_performance_stats(self, esxi_host):
         """
@@ -570,6 +613,9 @@ class VcenterApi(object):
             'stdv': dict(value=standard_deviation([x['percent_cpu_ready'] for x in array]), units='%')
         }
         # Threshold statistical values
+        if out['cpu_ready']['mean']['value'] is None or out['cpu_ready']['stdv']['value'] is None:
+            out['cpu_slots'] = dict(value=0, units='vCPU')
+            return out
         # print 'avg percent ready is {0}'.format(avg_percent_ready + std_percent_ready)
         if (out['cpu_ready']['mean']['value'] + out['cpu_ready']['stdv']['value']) > 5:
             out['cpu_slots'] = dict(value=0, units='vCPU')
@@ -580,12 +626,13 @@ class VcenterApi(object):
         # Calculate available vCPU provisioning capacity
         vcpu_usage_vals = [x['vcpu_usage'] for x in array]
         non_zero_vcpu_usage = filter(lambda usage: usage > 0, vcpu_usage_vals)
+        # Average vCPU usage in MHz along with the spread...
         out['vm_cpu_usage'] = {
             'mean': dict(value=mean(non_zero_vcpu_usage), units='MHz'),
             'stdv': dict(value=standard_deviation(non_zero_vcpu_usage), units='MHz')
         }
         # Calculate number of slots based on usage
-        est_vcpu_usage = out['vm_cpu_usage']['mean']['value'] + 0.5 * out['vm_cpu_usage']['stdv']['value']
+        est_vcpu_usage = out['vm_cpu_usage']['mean']['value'] + out['vm_cpu_usage']['stdv']['value']
         host_cpu_capacity = (host.summary.hardware.cpuMhz * host.summary.hardware.numCpuCores)
         available_host_cpu = host_cpu_capacity - host.summary.quickStats.overallCpuUsage
         try:
@@ -610,13 +657,16 @@ class VcenterApi(object):
         vms_mem_values_tmp = [x.summary.quickStats.guestMemoryUsage for x in vms]
         vms_mem_values = filter(lambda mem: mem > 0, vms_mem_values_tmp)
         available_host_ram = float(host.summary.hardware.memorySize) - host.summary.quickStats.overallMemoryUsage
+
+        avg_vm_mem_usage = mean(vms_mem_values)  # calculate what a mem slot is
+        if avg_vm_mem_usage is None:
+            avg_vm_mem_usage = 0
         try:
-            avg_vm_mem_usage = 0.9 * mean(vms_mem_values)  # calculate what a mem slot is
-            slots = available_host_ram / avg_vm_mem_usage
+            slots = round(available_host_ram / avg_vm_mem_usage)
             return dict(value=slots, unit='mem-slots')
         except ZeroDivisionError:
             print('Host {0} has no VMs'.format(host.name))
-            return dict(value=float('inf'), unit=None)
+            return dict(value=0.9*512, unit=None)
 
     def get_datastore_slots_available(self, clusters):
         """
@@ -636,6 +686,8 @@ class VcenterApi(object):
             for vm in vms:
                 used = 0
                 for datastore in vm.storage.perDatastoreUsage:
+                    if datastore.committed is None or datastore.uncommitted is None:
+                        continue  # Move on to next loop iteration
                     used = used + datastore.committed + datastore.uncommitted  # Units - Bytes
                 vm_storage_vals.append(used)
 
@@ -658,6 +710,8 @@ def mean(numbers):
     Calculates the arithmetic mean of an array of numerical values
     :param numbers:  list of number
     """
+    if len(numbers) == 0:
+        return None
     return np.mean(np.array(numbers))
 
 
@@ -667,6 +721,8 @@ def standard_deviation(numbers):
     :param numbers:
     :return:
     """
+    if len(numbers) == 0:
+        return None
     return np.std(np.array(numbers))
 
 

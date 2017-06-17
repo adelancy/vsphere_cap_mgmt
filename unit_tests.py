@@ -15,7 +15,7 @@ class TestVmwareScripts(unittest.TestCase):
         pass
 
     def test_get_all_vms(self):
-        vms = self.api.get_all_vms_view()
+        vms = self.api.get_view_container()
         self.assertIsNotNone(vms)
 
     def test_get_vm_perf_properties(self):
