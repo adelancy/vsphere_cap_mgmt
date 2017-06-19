@@ -2,7 +2,7 @@ from datetime import timedelta, datetime
 import atexit
 import ssl
 
-from pyvim import connect
+from pyVim import connect
 from pyVmomi import vmodl
 from pyVmomi import vim
 import numpy as np
@@ -366,7 +366,7 @@ class VcenterApi(object):
     def get_capacity_details_for_vms(self, vms):
         """
         Returns the capacity performance details for a list of VMs
-        :param [] vms:
+        :param [vim.VirtualMachines] vms:
         :return:
         """
         output = []
@@ -580,7 +580,9 @@ class VcenterApi(object):
         :return:
         """
         vms = host.vm
-        vcpu_count = sum([vm.summary.config.numCpu for vm in vms])
+        # Get a lit representing the (not None types) vcpu counts of all vms on the hosts
+        vcpus = filter(lambda vcpu: vcpu is not None, [vm.summary.config.numCpu for vm in vms])
+        vcpu_count = sum(vcpus)
         #  Check against vSphere scheduling algorithm limits
         if len(vms) > int(0.9 * 512) or vcpu_count > int(0.9 * 1024):
             return 0
@@ -670,7 +672,7 @@ class VcenterApi(object):
 
     def get_datastore_slots_available(self, clusters):
         """
-        Calculates the available VM provisioning ability for across all datastores in use by a cluster
+        Calculates the available VM provisioning ability across all datastores in use by a cluster
         :param clusters:
         :return:
         """
@@ -727,6 +729,13 @@ def standard_deviation(numbers):
 
 
 def convert_byte_units(val, unit='mega'):
+    """
+    Performs units conversion for bits.
+
+    :param val: Numerical value representing the number bits to be converted
+    :param unit: The ends state units
+    :return: The new value in units of unit
+    """
     if unit == 'kilo':
         return float(val) / 1024
     if unit == 'mega':
@@ -737,6 +746,12 @@ def convert_byte_units(val, unit='mega'):
 
 
 def parse_host_id_info(id_info):
+    """
+    Accepts a vSphere id tag and parses out the Asset and Service Tag numbers.
+
+    :param id_info:
+    :return: A dictionary consisting of the Asset and Service Tag numbers {assetTag: 123, serviceTag: 456}
+    """
     output = dict()
     for info in id_info:
         if info.identifierType.key == 'AssetTag':
