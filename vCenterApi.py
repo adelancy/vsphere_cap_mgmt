@@ -637,6 +637,9 @@ class VcenterApi(object):
             'mean': dict(value=mean(non_zero_vcpu_usage), units='MHz'),
             'stdv': dict(value=standard_deviation(non_zero_vcpu_usage), units='MHz')
         }
+        if out['vm_cpu_usage']['mean']['value'] is None or out['vm_cpu_usage']['stdv']['value'] is None:
+            out['cpu_slots'] = dict(value=0, units='vCPU')
+            return out
         # Calculate number of slots based on usage
         est_vcpu_usage = out['vm_cpu_usage']['mean']['value'] + out['vm_cpu_usage']['stdv']['value']
         host_cpu_capacity = (host.summary.hardware.cpuMhz * host.summary.hardware.numCpuCores)
