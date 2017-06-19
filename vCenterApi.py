@@ -618,6 +618,10 @@ class VcenterApi(object):
         if out['cpu_ready']['mean']['value'] is None or out['cpu_ready']['stdv']['value'] is None:
             out['cpu_slots'] = dict(value=0, units='vCPU')
             return out
+        if out['cpu_costop']['mean']['value'] is None or out['cpu_costop']['stdv']['value'] is None:
+            out['cpu_slots'] = dict(value=0, units='vCPU')
+            return out
+
         # print 'avg percent ready is {0}'.format(avg_percent_ready + std_percent_ready)
         if (out['cpu_ready']['mean']['value'] + out['cpu_ready']['stdv']['value']) > 5:
             out['cpu_slots'] = dict(value=0, units='vCPU')
