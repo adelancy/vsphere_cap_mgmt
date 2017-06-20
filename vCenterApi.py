@@ -392,10 +392,6 @@ class VcenterApi(object):
             output['cpuLimit'] = dict(value=None, units='MHz')
         else:
             output['cpuLimit'] = dict(value=resource_entity.resourceConfig.cpuAllocation.limit, units='MHz')
-        if resource_entity.resourceConfig.memoryAllocation.limit == -1:
-            output['memLimit'] = dict(value=None, units='MB')
-        else:
-            output['memLimit'] = dict(value=resource_entity.resourceConfig.cpuAllocation.memoryAllocation, units='MB')
         if resource_entity.resourceConfig.cpuAllocation.reservation == 0:
             output['cpuReservation'] = dict(value=None, units='MHz')
         else:

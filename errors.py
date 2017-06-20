@@ -9,3 +9,7 @@ class QueryIsEmptyError(AssertionError):
 class HostConnectionError(vmodl.fault.HostCommunication):
     def __init__(self, *args, **kwargs):
         super(HostConnectionError, self).__init__(* args, **kwargs)
+
+
+class VsphereFaultError(vmodl.MethodFault):
+    pass
