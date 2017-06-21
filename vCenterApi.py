@@ -380,7 +380,10 @@ class VcenterApi(object):
         output['vDisks'] = []
         output['vNICs'] = []
 
-        output['uuid'] = resource_entity.config.instanceUuid  # vCenter globally unique ID
+        try:
+            output['uuid'] = resource_entity.config.instanceUuid  # vCenter globally unique ID (optional property)
+        except AttributeError:
+            pass
         output['template'] = resource_entity.config.template
         output['powerState'] = resource_entity.runtime.powerState
         output['host'] = resource_entity.summary.runtime.host.summary.config.name
