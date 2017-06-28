@@ -208,7 +208,9 @@ class VcenterApi(object):
     def stat_check(self, counter_name):
         """
         Obtains the counter id for a given counter name passed in . syntax. Ex cpu.ready.summation
-        :param counter_name: name of counter in dot syntax
+
+        :param counter_name: name of vsphere performance counter in dot syntax
+        :return: The key ID of the performance counter
         """
         counter_key = self.perf_dict[counter_name]
         return counter_key
@@ -217,19 +219,32 @@ class VcenterApi(object):
         """
         Returns a view container that has the information on the esxi hosts. Access the view property to get the list
         of esix hosts.
-        :return:
+
+        :return: A list of all ESXi hosts registered to vCenter instance.
         """
         # Search for all ESXi hosts
         content = self.db_conn.content
         return content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True).view
 
     def get_esxi_hosts_capacity(self, hosts):
+        """
+        Captures a current capacity snapshot of the list of ESXi hosts passed in.
+
+        :param [vim.HostSystem] hosts:
+        :return: A list of dict objects each representing the current capacity snapshot for a host
+        """
         out = []
         for host in hosts:
             out.append(self.get_esxi_host_capacity_details(host))
         return out
 
     def get_esxi_host_capacity_details(self, host):
+        """
+        Captures the current capacity snapshot of the ESXi host passed in.
+
+        :param vim.HostSystem host:
+        :return: A dictionary representing the current capacity snapshot for a host
+        """
         try:
             domain = host.config.network.dnsConfig.searchDomain[0]
             hostname = host.config.network.dnsConfig.hostName
@@ -267,7 +282,7 @@ class VcenterApi(object):
             }
 
         except vmodl.fault.HostCommunication:
-            raise HostConnectionError('Problem vCenter connection to Host, please investigate!')
+            raise HostConnectionError('Problem vCenter connection to Host - {0}, please investigate!'.format(hostname))
 
     def get_esxi_host_performance_stats(self, esxi_host):
         """
@@ -291,17 +306,34 @@ class VcenterApi(object):
         return self.get_resource_performance_stats(esxi_host, keymap)
 
     def get_host_by_dns(self, dns_name=None):
+        """
+        Queries vCenter for an ESXi host given a hostname or DNS entry.
+
+        :param string dns_name:
+        :return vim.HostSystem: ESXi host system object.
+        """
         try:
             return self.db_conn.content.searchIndex.FindByDnsName(dnsName=dns_name, vmSearch=False)
         except (AttributeError, TypeError):
             pass
 
     def get_datastores_view(self):
+        """
+        Queries vCenter for the list of all datastores created on the ESXi instance.
+
+        :return [vim.DataStore]:
+        """
         # Search for all Datastores hosts
         content = self.db_conn.content
         return content.viewManager.CreateContainerView(content.rootFolder, [vim.Datastore], True).view
 
     def get_datastore_capacity_info(self, datastore_view):
+        """
+        Captures a datastore snapshot of the list datastores passed in
+
+        :param [vim.DataStore] datastore_view:
+        :return [Dictionary]:  Current capacity details of the datastores passed in.
+        """
         output = []
         for datastore in datastore_view:
             info = {
@@ -367,42 +399,47 @@ class VcenterApi(object):
         """
         Returns the capacity performance details for a list of VMs
         :param [vim.VirtualMachines] vms:
-        :return:
+        :rtype: An array of dictionary objects with the performance stat details of eac Virtual Machine.
         """
         output = []
         for resource_entity in vms:
             output.append(self.get_vm_capacity_details(resource_entity))
         return output
 
-    def get_vm_capacity_details(self, resource_entity):
+    def get_vm_capacity_details(self, vm):
+        """
+        Returns the capacity performance details for a single Virtual Machine given.
+        :param vim.VirtualMachine vm:
+        :rtype: A dictionary objects with the performance stat details of eac Virtual Machine.
+        """
         output = dict()
-        summary = resource_entity.summary
+        summary = vm.summary
         output['vDisks'] = []
         output['vNICs'] = []
 
         try:
-            output['uuid'] = resource_entity.config.instanceUuid  # vCenter globally unique ID (optional property)
+            output['uuid'] = vm.config.instanceUuid  # vCenter globally unique ID (optional property)
         except AttributeError:
             pass
-        output['template'] = resource_entity.config.template
-        output['powerState'] = resource_entity.runtime.powerState
-        output['host'] = resource_entity.summary.runtime.host.summary.config.name
-        output['cpuUsage'] = dict(value=resource_entity.summary.quickStats.overallCpuUsage, units='MHz')
-        output['memoryUsage'] = dict(value=resource_entity.summary.quickStats.guestMemoryUsage, units='MB')
-        output['status'] = resource_entity.summary.overallStatus
+        output['template'] = vm.config.template
+        output['powerState'] = vm.runtime.powerState
+        output['host'] = vm.summary.runtime.host.summary.config.name
+        output['cpuUsage'] = dict(value=vm.summary.quickStats.overallCpuUsage, units='MHz')
+        output['memoryUsage'] = dict(value=vm.summary.quickStats.guestMemoryUsage, units='MB')
+        output['status'] = vm.summary.overallStatus
         # Convert limit and reservation values from -1 to None
-        if resource_entity.resourceConfig.cpuAllocation.limit == -1:
+        if vm.resourceConfig.cpuAllocation.limit == -1:
             output['cpuLimit'] = dict(value=None, units='MHz')
         else:
-            output['cpuLimit'] = dict(value=resource_entity.resourceConfig.cpuAllocation.limit, units='MHz')
-        if resource_entity.resourceConfig.cpuAllocation.reservation == 0:
+            output['cpuLimit'] = dict(value=vm.resourceConfig.cpuAllocation.limit, units='MHz')
+        if vm.resourceConfig.cpuAllocation.reservation == 0:
             output['cpuReservation'] = dict(value=None, units='MHz')
         else:
-            output['cpuReservation'] = dict(value=resource_entity.resourceConfig.cpuAllocation.reservation, units='MHz')
-        if resource_entity.resourceConfig.memoryAllocation.reservation == 0:
+            output['cpuReservation'] = dict(value=vm.resourceConfig.cpuAllocation.reservation, units='MHz')
+        if vm.resourceConfig.memoryAllocation.reservation == 0:
             output['memReservation'] = dict(value=None, units='MB')
         else:
-            output['memReservation'] = dict(value=resource_entity.resourceConfig.memoryAllocation.reservation,
+            output['memReservation'] = dict(value=vm.resourceConfig.memoryAllocation.reservation,
                                             units='MB')
 
         output['memCapacity'] = dict(value=summary.config.memorySizeMB, units='MB')
@@ -411,7 +448,7 @@ class VcenterApi(object):
         output['guestOS'] = summary.config.guestFullName
         output['numOfCpus'] = summary.config.numCpu
         output['datstoreUsage'] = []
-        for datastoreInfo in resource_entity.storage.perDatastoreUsage:
+        for datastoreInfo in vm.storage.perDatastoreUsage:
             output['datstoreUsage'].append(
                 dict(
                     name=datastoreInfo.datastore.info.name,
@@ -421,7 +458,7 @@ class VcenterApi(object):
                     unshared=dict(value=(float(datastoreInfo.unshared) / pow(1024, 3)), units='GB')
                 )
             )
-        vm_hardware = resource_entity.config.hardware
+        vm_hardware = vm.config.hardware
         for each_vm_hardware in vm_hardware.device:
             if (each_vm_hardware.key >= 2000) and (each_vm_hardware.key < 3000):
                 vdisk = {
@@ -442,16 +479,16 @@ class VcenterApi(object):
                 }
                 output['vNICs'].append(vnetwork_device)
         output['timestamp'] = self.db_conn.CurrentTime()
-        output['performanceStats'] = self.get_vm_performance_stats(resource_entity)
-        output['raw'] = resource_entity
+        output['performanceStats'] = self.get_vm_performance_stats(vm)
+        output['raw'] = vm
         return output
 
-    def get_vm_performance_stats(self, resource_entity):
+    def get_vm_performance_stats(self, vm):
         """
         See https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/datastore_counters.html
         for more information
-        :param resource_entity:
-        :param interval: Time interval to query against in minutes
+        :param vim.VirtualMachine vm:
+        :param Integer interval: Time interval to query against in minutes
         :param vchtime:
         :return:
         """
@@ -480,17 +517,23 @@ class VcenterApi(object):
             cpuCoStop=dict(counter='cpu.costop.summation', units='ms'),
         )
 
-        output = self.get_resource_performance_stats(resource_entity, keymap)
+        output = self.get_resource_performance_stats(vm, keymap)
 
         for k, v in queue_stats.items():
             try:
-                output[k] = self.get_cpu_queue_stats(resource_entity, counter_name=v.get('counter'))
+                output[k] = self.get_cpu_queue_stats(vm, counter_name=v.get('counter'))
             except QueryIsEmptyError:
                 pass
 
         return output
 
     def get_resource_performance_stats(self, resource_entity, keymap):
+        """
+        Gets the vsphere performance statistics for the vSphere resource passed in.
+        :param vim.ManagedEntity resource_entity: Managed Entity such as VirtualMachine, HostSystem etc...
+        :param dict keymap: Dictionary consisting of keys, performance counter names and units defining the status to return.
+        :return:
+        """
         out = dict()
         out['queryStartTime'] = self._start
         out['queryEndTime'] = self._end
@@ -543,9 +586,10 @@ class VcenterApi(object):
 
     def get_cpu_queue_stats(self, vm, counter_name='cpu.ready.summation'):
         """
-        Design to calculate stats for queuing time
-        :param vm:
-        :param counter_name:
+        Query for the vCPU queuing stats (i.e. cpu ready, cpu costop, cpu wait etc...) for a vCPU
+
+        :param vim.VirtualMachine vm:
+        :param string counter_name:
         :return:
         """
         results = self.build_perf_query((self.stat_check(counter_name)), 'aggregated', vm)
@@ -575,6 +619,7 @@ class VcenterApi(object):
     def get_available_host_vcpus(self, host):
         """
         Computes the available estimated vCPUs that the host can support based on current VM usage
+
         :param HostSystem host:
         :return:
         """
@@ -656,7 +701,8 @@ class VcenterApi(object):
 
     def get_memory_slots_available(self, host):
         """
-        Calculates the available VM provisioning capacity of a host based on memory slots
+        Calculates the available VM provisioning capacity of a host based on memory slots.
+
         :param host:
         :return:
         """
@@ -679,6 +725,7 @@ class VcenterApi(object):
     def get_datastore_slots_available(self, clusters):
         """
         Calculates the available VM provisioning ability across all datastores in use by a cluster
+
         :param clusters:
         :return:
         """
@@ -742,6 +789,8 @@ def convert_byte_units(val, unit='mega'):
     :param unit: The ends state units
     :return: The new value in units of unit
     """
+    if val is None:
+        return float('NaN')
     if unit == 'kilo':
         return float(val) / 1024
     if unit == 'mega':
