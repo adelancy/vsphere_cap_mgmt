@@ -37,6 +37,7 @@ class VcenterApi(object):
     def create_vSphere_connection(cls, host, user, password, port):
         """
         Class method used to create connection to a vCenter instance over an HTTPS session.
+
         :param host:  Hostname or IP Address of target vCenter instance
         :param user: Username
         :param password: Password
@@ -100,6 +101,7 @@ class VcenterApi(object):
     def get_all_vms(self):
         """
         Returns all VMs associated with the connected vCenter instance.
+
         :return: A list of VM Managed Entity objects
         """
         return self.get_view_container().view
@@ -107,6 +109,7 @@ class VcenterApi(object):
     def get_vm_by_uuid(self, uuid):
         """
         Query a VM by its vCenter UUID.
+
         :param uuid: vCenter Unique Identifier
         :return:
         """
@@ -136,6 +139,8 @@ class VcenterApi(object):
 
     def build_perf_query(self, counter_id, instance='all', resource_entity=vim.VirtualMachine):
         """
+        Create a vsphere performance query based on a performance counter and resource object type.
+
         :param datetime vc_time:
         :param Int counter_id: Performance counter ID
         :param instance:
@@ -165,7 +170,8 @@ class VcenterApi(object):
         """
         Returns a listing of the valid performance counters. See link for more information...
         https://communities.vmware.com/docs/DOC-5600
-        :return:
+
+        :return: Dictionary representing the list of performance counters available and associated index.
         """
         # Get all the performance counters
         perf_list = self.db_conn.content.perfManager.perfCounter
@@ -287,6 +293,7 @@ class VcenterApi(object):
     def get_esxi_host_performance_stats(self, esxi_host):
         """
         By default provides average values over the last 60 minutes
+
         :param esxi_host: pyVmomi HostSystem Managed Entity
         :param interval:
         :param kwargs:
@@ -398,6 +405,7 @@ class VcenterApi(object):
     def get_capacity_details_for_vms(self, vms):
         """
         Returns the capacity performance details for a list of VMs
+
         :param [vim.VirtualMachines] vms:
         :rtype: An array of dictionary objects with the performance stat details of eac Virtual Machine.
         """
@@ -409,6 +417,7 @@ class VcenterApi(object):
     def get_vm_capacity_details(self, vm):
         """
         Returns the capacity performance details for a single Virtual Machine given.
+
         :param vim.VirtualMachine vm:
         :rtype: A dictionary objects with the performance stat details of eac Virtual Machine.
         """
@@ -487,6 +496,7 @@ class VcenterApi(object):
         """
         See https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/datastore_counters.html
         for more information
+
         :param vim.VirtualMachine vm:
         :param Integer interval: Time interval to query against in minutes
         :param vchtime:
@@ -530,6 +540,7 @@ class VcenterApi(object):
     def get_resource_performance_stats(self, resource_entity, keymap):
         """
         Gets the vsphere performance statistics for the vSphere resource passed in.
+
         :param vim.ManagedEntity resource_entity: Managed Entity such as VirtualMachine, HostSystem etc...
         :param dict keymap: Dictionary consisting of keys, performance counter names and units defining the status to return.
         :return:
@@ -566,6 +577,7 @@ class VcenterApi(object):
     def get_cpu_stat_moments(self, vms, counter_name='cpu.ready.summation'):
         """
         Returns the arithmetic mean and standard deviation of a distribution of values for a cpu counter
+
         :param vms:
         :param counter_name:
         :return:
@@ -773,6 +785,7 @@ def mean(numbers):
 def standard_deviation(numbers):
     """
     Computes the standard deviation of an array of numerical values
+
     :param numbers:
     :return:
     """
