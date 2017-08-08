@@ -59,6 +59,7 @@ class VcenterApi(object):
     def disconnect_vSphere_connection(self):
         """
         Disconnects the connected vCenter instance.
+
         :return:
         """
         connect.Disconnect(self.db_conn)
@@ -111,19 +112,17 @@ class VcenterApi(object):
         Query a VM by its vCenter UUID.
 
         :param uuid: vCenter Unique Identifier
-        :return:
+        :return vim.Virtual Machine: Virtual Machine object
         """
         return self.db_conn.content.searchIndex.FindByUuid(None, uuid, True, True)
 
-    def get_vm_by_ip(self, search_index, ip_address):
+    def get_vm_by_ip(self, ip_address):
         """
         Query a VM by it's IP address.
-
-        :param search_index:
         :param ip_address:
-        :return:
+        :return vim.Virtual Machine: Virtual Machine object
         """
-        return search_index.FindByIp(None, ip_address, True)
+        return self.db_conn.content.searchIndex.FindByIp(None, ip_address, True)
 
     def get_vm_by_dns(self, dns_name=None):
         try:
@@ -139,14 +138,12 @@ class VcenterApi(object):
 
     def build_perf_query(self, counter_id, instance='all', resource_entity=vim.VirtualMachine):
         """
-        Create a vsphere performance query based on a performance counter and resource object type.
+        Builds a vSphere performance counter query.
 
-        :param datetime vc_time:
         :param Int counter_id: Performance counter ID
-        :param instance:
-        :param resource_entity:
-        :param interval: time interval to query over in seconds
-        :return:
+        :param instance: Flag used to determine how the query is executed.
+        :param resource_entity: pyvmomi managed entitity object i.e. VirtualMachine
+        :return: The query results as a performance manager query object.
         """
         perf_manager = self.db_conn.content.perfManager
         if instance == "all":
@@ -236,7 +233,7 @@ class VcenterApi(object):
         """
         Captures a current capacity snapshot of the list of ESXi hosts passed in.
 
-        :param [vim.HostSystem] hosts:
+        :param [vim.HostSystem] hosts: Array of ESXi hosts
         :return: A list of dict objects each representing the current capacity snapshot for a host
         """
         out = []
@@ -295,9 +292,6 @@ class VcenterApi(object):
         By default provides average values over the last 60 minutes
 
         :param esxi_host: pyVmomi HostSystem Managed Entity
-        :param interval:
-        :param kwargs:
-        :return:
         """
         keymap = dict(
             cpuUsageAvg=dict(counter='cpu.usage.average', units='percentage'),
@@ -338,8 +332,8 @@ class VcenterApi(object):
         """
         Captures a datastore snapshot of the list datastores passed in
 
-        :param [vim.DataStore] datastore_view:
-        :return [Dictionary]:  Current capacity details of the datastores passed in.
+        :param [vim.DataStore] datastore_view: Datastore
+        :return [dict]:  Current capacity details of the datastores passed in.
         """
         output = []
         for datastore in datastore_view:
@@ -363,6 +357,12 @@ class VcenterApi(object):
         return content.viewManager.CreateContainerView(content.rootFolder, [vim.ClusterComputeResource], True).view
 
     def get_cluster_capacity_details(self, clusters):
+        """
+        Gets the current capacity details for a set of compute clusters.
+
+        :param [vim.ComputeCluster] clusters:
+        :return: dict
+        """
         output = []
         for cluster in clusters:
             try:
@@ -406,8 +406,8 @@ class VcenterApi(object):
         """
         Returns the capacity performance details for a list of VMs
 
-        :param [vim.VirtualMachines] vms:
-        :rtype: An array of dictionary objects with the performance stat details of eac Virtual Machine.
+        :param [vim.VirtualMachines] vms: Array of Virtual Machine objects
+        :rtype: dict
         """
         output = []
         for resource_entity in vms:
@@ -418,8 +418,8 @@ class VcenterApi(object):
         """
         Returns the capacity performance details for a single Virtual Machine given.
 
-        :param vim.VirtualMachine vm:
-        :rtype: A dictionary objects with the performance stat details of eac Virtual Machine.
+        :param vim.VirtualMachine vm: Virtual Machine object
+        :rtype: dict
         """
         output = dict()
         summary = vm.summary
@@ -497,10 +497,8 @@ class VcenterApi(object):
         See https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/datastore_counters.html
         for more information
 
-        :param vim.VirtualMachine vm:
-        :param Integer interval: Time interval to query against in minutes
-        :param vchtime:
-        :return:
+        :param vim.VirtualMachine vm: Virtual Machine object.
+        :return: Dictionary object representing the performance stats
         """
 
         keymap = dict(
@@ -543,7 +541,7 @@ class VcenterApi(object):
 
         :param vim.ManagedEntity resource_entity: Managed Entity such as VirtualMachine, HostSystem etc...
         :param dict keymap: Dictionary consisting of keys, performance counter names and units defining the status to return.
-        :return:
+        :return: Dictonary object representing the performance stats along with units
         """
         out = dict()
         out['queryStartTime'] = self._start
@@ -578,9 +576,9 @@ class VcenterApi(object):
         """
         Returns the arithmetic mean and standard deviation of a distribution of values for a cpu counter
 
-        :param vms:
-        :param counter_name:
-        :return:
+        :param [vim.VirtualMachine] vms:
+        :param String counter_name: vSphere CPU counter name in dot syntax.
+        :return: mean(values), mean(% values), standard_deviation(values), standard_deviation(% values)
         """
         vals = []
         percent_ready_vals = []
@@ -600,9 +598,9 @@ class VcenterApi(object):
         """
         Query for the vCPU queuing stats (i.e. cpu ready, cpu costop, cpu wait etc...) for a vCPU
 
-        :param vim.VirtualMachine vm:
-        :param string counter_name:
-        :return:
+        :param vim.VirtualMachine vm: Virtual Machine object
+        :param string counter_name: vSphere performance counter name in dot syntax
+        :return: Dictionary object with cpu queue stats and associated units.
         """
         results = self.build_perf_query((self.stat_check(counter_name)), 'aggregated', vm)
         avg_stat = float(mean(results[0].value[0].value))  # actual ready time in ms
@@ -630,10 +628,10 @@ class VcenterApi(object):
 
     def get_available_host_vcpus(self, host):
         """
-        Computes the available estimated vCPUs that the host can support based on current VM usage
+        Computes the available estimated vCPUs that the host can support based on current VM usage.
 
-        :param HostSystem host:
-        :return:
+        :param HostSystem host: vSphere ESXi host object
+        :return: Dictionary containing the number of estimated additional vCPUs the host can support
         """
         vms = host.vm
         # Get a lit representing the (not None types) vcpu counts of all vms on the hosts
@@ -715,8 +713,7 @@ class VcenterApi(object):
         """
         Calculates the available VM provisioning capacity of a host based on memory slots.
 
-        :param host:
-        :return:
+        :param vim.HostSystem host: vSphere ESXi Host.
         """
         vms = host.vm
         # Calculate average vm memory usage:
@@ -738,8 +735,7 @@ class VcenterApi(object):
         """
         Calculates the available VM provisioning ability across all datastores in use by a cluster
 
-        :param clusters:
-        :return:
+        :param [vim.ComputeCluster] clusters: Array of Compute Cluster objects.
         """
         cluster_datastore_slots = dict()
         for cluster in clusters:
@@ -775,6 +771,7 @@ def get_epoch_value():
 def mean(numbers):
     """
     Calculates the arithmetic mean of an array of numerical values
+
     :param numbers:  list of number
     """
     if len(numbers) == 0:
@@ -786,8 +783,7 @@ def standard_deviation(numbers):
     """
     Computes the standard deviation of an array of numerical values
 
-    :param numbers:
-    :return:
+    :param numbers:  list of number
     """
     if len(numbers) == 0:
         return None
