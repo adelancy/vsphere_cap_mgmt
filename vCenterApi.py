@@ -7,7 +7,7 @@ from pyVmomi import vmodl
 from pyVmomi import vim
 import numpy as np
 
-from errors import QueryIsEmptyError, HostConnectionError
+from .errors import QueryIsEmptyError, HostConnectionError
 
 
 class VcenterApi(object):
