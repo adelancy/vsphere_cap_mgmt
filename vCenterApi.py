@@ -7,7 +7,7 @@ from pyVmomi import vmodl
 from pyVmomi import vim
 import numpy as np
 
-from errors import QueryIsEmptyError, HostConnectionError
+from .errors import QueryIsEmptyError, HostConnectionError
 
 
 class VcenterApi(object):
@@ -342,9 +342,9 @@ class VcenterApi(object):
                 'url': datastore.info.url,
                 'capacity': dict(value=convert_byte_units(datastore.summary.capacity, unit='giga'), units='GB'),
                 'freeSpace': dict(value=convert_byte_units(datastore.summary.freeSpace, unit='giga'), units='GB'),
-                'uncommitted ': dict(value=convert_byte_units(datastore.summary.uncommitted, unit='giga'), units='GB'),
+                'uncommitted': dict(value=convert_byte_units(datastore.summary.uncommitted, unit='giga'), units='GB'),
                 'vmCount': len(datastore.vm),
-                'accessible ': datastore.summary.accessible,
+                'accessible': datastore.summary.accessible,
                 'type': datastore.summary.type,
                 'timestamp': self.db_conn.CurrentTime(),
                 'raw': datastore

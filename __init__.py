@@ -1,1 +1,1 @@
-from vCenterApi import VcenterApi
+from .vCenterApi import VcenterApi

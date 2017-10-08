@@ -1,6 +1,4 @@
 import unittest
-import json
-from datetime import datetime, timedelta
 from vCenterApi import VcenterApi
 
 
